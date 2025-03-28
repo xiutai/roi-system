@@ -57,7 +57,7 @@ class UserController extends Controller
                     'unique:users',
                 ],
                 'password' => 'required|string|min:8|confirmed',
-                'is_admin' => 'boolean',
+                'is_admin' => 'nullable|boolean',
             ];
 
             $request->validate($rules);
@@ -79,7 +79,7 @@ class UserController extends Controller
             ]);
 
             return redirect()->route('users.index')
-                ->with('success', '用户已成功创建。');
+                ->with('success', '用户已成功创建�?);
             
         } catch (\Exception $e) {
             // 记录异常
@@ -160,8 +160,7 @@ class UserController extends Controller
                 'is_admin' => $request->has('is_admin') ? 1 : 0,
             ];
 
-            // 如果提供了新密码，更新密码
-            if ($request->filled('password')) {
+            // 如果提供了新密码，更新密�?            if ($request->filled('password')) {
                 $data['password'] = Hash::make($request->password);
             }
 
@@ -177,7 +176,7 @@ class UserController extends Controller
             $user->update($data);
 
             // 记录用户更新日志
-            Log::info('用户信息已更新', [
+            Log::info('用户信息已更�?, [
                 'user_id' => $user->id,
                 'updated_by' => auth()->id(),
                 'old_data' => $oldData,
@@ -191,9 +190,9 @@ class UserController extends Controller
             ]);
 
             // 设置成功消息
-            $message = '用户信息已成功更新。';
+            $message = '用户信息已成功更新�?;
             if ($request->filled('password')) {
-                $message = '用户信息已成功更新，密码已修改。';
+                $message = '用户信息已成功更新，密码已修改�?;
             }
 
             return redirect()->route('users.index')
@@ -223,7 +222,7 @@ class UserController extends Controller
         // 防止删除自己
         if ($user->id === auth()->id()) {
             return redirect()->route('users.index')
-                ->with('error', '您不能删除自己的账户。');
+                ->with('error', '您不能删除自己的账户�?);
         }
 
         // 记录用户删除前的信息
@@ -238,12 +237,12 @@ class UserController extends Controller
         $user->delete();
 
         // 记录用户删除日志
-        Log::info('用户已删除', [
+        Log::info('用户已删�?, [
             'deleted_user' => $userData,
             'deleted_by' => auth()->id(),
         ]);
 
         return redirect()->route('users.index')
-            ->with('success', '用户已成功删除。');
+            ->with('success', '用户已成功删除�?);
     }
 }

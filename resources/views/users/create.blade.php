@@ -69,7 +69,8 @@
             </div>
             
             <div class="mb-3 form-check">
-                <input type="checkbox" class="form-check-input" id="is_admin" name="is_admin" {{ old('is_admin') ? 'checked' : '' }}>
+                <input type="hidden" name="is_admin" value="0">
+                <input type="checkbox" class="form-check-input" id="is_admin" name="is_admin" value="1" {{ old('is_admin') ? 'checked' : '' }}>
                 <label class="form-check-label" for="is_admin">设为管理员</label>
                 <small class="form-text text-muted d-block">管理员可以管理所有用户。</small>
             </div>
