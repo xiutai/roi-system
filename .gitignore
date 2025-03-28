@@ -14,5 +14,9 @@ yarn-error.log
 /.idea
 /.vscode
 /.vagrant
-storage/logs/*.log
+.phpunit.result.cache
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/logs/*
 bootstrap/cache/*.php

@@ -197,7 +197,24 @@
                 firstDay: 1
             },
             startDate: '{{ $startDate }}',
-            endDate: '{{ $endDate }}'
+            endDate: '{{ $endDate }}',
+            ranges: {
+                '今天': [moment(), moment()],
+                '昨天': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+                '最近3天': [moment().subtract(2, 'days'), moment()],
+                '最近7天': [moment().subtract(6, 'days'), moment()],
+                '最近14天': [moment().subtract(13, 'days'), moment()],
+                '最近30天': [moment().subtract(29, 'days'), moment()],
+                '最近60天': [moment().subtract(59, 'days'), moment()],
+                '最近90天': [moment().subtract(89, 'days'), moment()],
+                '本月': [moment().startOf('month'), moment().endOf('month')],
+                '上月': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')],
+                '前3个月': [moment().subtract(3, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')],
+                '本季度': [moment().startOf('quarter'), moment().endOf('quarter')],
+                '上季度': [moment().subtract(1, 'quarter').startOf('quarter'), moment().subtract(1, 'quarter').endOf('quarter')],
+                '本年': [moment().startOf('year'), moment().endOf('year')],
+                '上一年': [moment().subtract(1, 'year').startOf('year'), moment().subtract(1, 'year').endOf('year')]
+            }
         }, function(start, end, label) {
             $('#start_date').val(start.format('YYYY-MM-DD'));
             $('#end_date').val(end.format('YYYY-MM-DD'));
@@ -218,7 +235,24 @@
                 firstDay: 1
             },
             startDate: '{{ $startDate }}',
-            endDate: '{{ $endDate }}'
+            endDate: '{{ $endDate }}',
+            ranges: {
+                '今天': [moment(), moment()],
+                '昨天': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+                '最近3天': [moment().subtract(2, 'days'), moment()],
+                '最近7天': [moment().subtract(6, 'days'), moment()],
+                '最近14天': [moment().subtract(13, 'days'), moment()],
+                '最近30天': [moment().subtract(29, 'days'), moment()],
+                '最近60天': [moment().subtract(59, 'days'), moment()],
+                '最近90天': [moment().subtract(89, 'days'), moment()],
+                '本月': [moment().startOf('month'), moment().endOf('month')],
+                '上月': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')],
+                '前3个月': [moment().subtract(3, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')],
+                '本季度': [moment().startOf('quarter'), moment().endOf('quarter')],
+                '上季度': [moment().subtract(1, 'quarter').startOf('quarter'), moment().subtract(1, 'quarter').endOf('quarter')],
+                '本年': [moment().startOf('year'), moment().endOf('year')],
+                '上一年': [moment().subtract(1, 'year').startOf('year'), moment().subtract(1, 'year').endOf('year')]
+            }
         }, function(start, end, label) {
             $('#batch_start_date').val(start.format('YYYY-MM-DD'));
             $('#batch_end_date').val(end.format('YYYY-MM-DD'));

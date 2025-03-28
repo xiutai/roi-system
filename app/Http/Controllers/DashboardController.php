@@ -165,7 +165,7 @@ class DashboardController extends Controller
                         'cpa' => 0,
                         'daily_roi' => 0,
                         'first_deposit_price' => 0,
-                        'roi_trends' => array_fill_keys([1, 2, 3, 5, 7, 14, 30, 40], 0),
+                        'roi_trends' => array_fill_keys([2, 3, 5, 7, 14, 30, 40], 0),
                         'roi_after_40' => 0
                     ];
                     continue;
@@ -225,37 +225,31 @@ class DashboardController extends Controller
                     'arpu' => round($arpu, 2),
                     'cpa' => round($cpa, 2),
                     'first_deposit_price' => round($firstDepositPrice, 2),
-                    'roi_trends' => array_fill_keys([1, 2, 3, 5, 7, 14, 30, 40], 0),
+                    'roi_trends' => array_fill_keys([2, 3, 5, 7, 14, 30, 40], 0),
                     'roi_after_40' => 0,
                     'rate_value' => $rateValue
                 ];
             }
             
             // 多日ROI计算
-            $dayRanges = [1, 2, 3, 5, 7, 14, 30, 40]; // 1日、2日、3日等ROI
+            $dayRanges = [2, 3, 5, 7, 14, 30, 40]; // 移除1日ROI
             
-            // 初始化各日期的ROI趋势数据 - 但不要覆盖已有的1日ROI
+            // 初始化各日期的ROI趋势数据
             foreach ($dates as $dateStr) {
                 if (isset($dailyStats[$dateStr])) {
-                    // 保留当日ROI值
-                    $dailyRoi = $dailyStats[$dateStr]['daily_roi'];
-                    
-                    // 初始化ROI趋势数组，确保包含所有天数
+                    // 确保ROI趋势数组已初始化
                     if (!isset($dailyStats[$dateStr]['roi_trends']) || !is_array($dailyStats[$dateStr]['roi_trends'])) {
                         $dailyStats[$dateStr]['roi_trends'] = array_fill_keys($dayRanges, 0);
                     }
                     
-                    // 设置1日ROI等于当日ROI
-                    $dailyStats[$dateStr]['roi_trends'][1] = $dailyRoi;
-                    
-                    // 初始化40日后ROI
+                    // 确保40日后ROI已初始化
                     if (!isset($dailyStats[$dateStr]['roi_after_40'])) {
                         $dailyStats[$dateStr]['roi_after_40'] = 0;
                     }
                 }
             }
             
-            // 对每个日期计算各个天数范围的ROI (从2日ROI开始，因为1日ROI就是当日ROI)
+            // 对每个日期计算各个天数范围的ROI (从2日ROI开始)
             foreach ($dates as $dateStr) {
                 $currentDateStats = $dailyStats[$dateStr] ?? null;
                 
@@ -274,13 +268,8 @@ class DashboardController extends Controller
                     continue;
                 }
                 
-                // 为每个天数范围计算ROI (跳过1日ROI，因为它就是当日ROI)
+                // 为每个天数范围计算ROI
                 foreach ($dayRanges as $dayCount) {
-                    // 跳过1日ROI，因为它已经在前面的步骤中设置为当日ROI
-                    if ($dayCount == 1) {
-                        continue;
-                    }
-                    
                     // 计算结束日期
                     $endDateForRange = $startDateObj->copy()->addDays($dayCount - 1);
                     $endDateStrForRange = $endDateForRange->format('Y-m-d');
@@ -339,19 +328,24 @@ class DashboardController extends Controller
             
             // 准备图表数据
             $chartSeries = [];
-            $chartDayRanges = [1, 2, 3, 5, 7, 14, 30, 40]; // 与前面的dayRanges保持一致
+            $chartDayRanges = [1, 2, 3, 5, 7, 14, 30, 40]; // 修改：添加1日ROI
             
             foreach ($chartDayRanges as $days) {
                 $seriesData = [];
                 
                 // 只显示最近30天的数据
                 foreach ($displayDates as $dateStr) {
-                    $value = $dailyStats[$dateStr]['roi_trends'][$days] ?? 0;
+                    if ($days == 1) {
+                        // 1日ROI等于当日ROI
+                        $value = $dailyStats[$dateStr]['daily_roi'] ?? 0;
+                    } else {
+                        $value = $dailyStats[$dateStr]['roi_trends'][$days] ?? 0;
+                    }
                     $seriesData[] = $value;
                 }
                 
                 $chartSeries[] = [
-                    'name' => "{$days}日ROI",
+                    'name' => $days == 1 ? "当日ROI" : "{$days}日ROI",
                     'data' => $seriesData
                 ];
             }
@@ -379,7 +373,7 @@ class DashboardController extends Controller
                 'cpa' => 0,
                 'daily_roi' => 0,
                 'first_deposit_price' => 0,
-                'roi_trends' => array_fill_keys([1, 2, 3, 5, 7, 14, 30, 40], 0),
+                'roi_trends' => array_fill_keys([2, 3, 5, 7, 14, 30, 40], 0),
                 'roi_after_40' => 0
             ];
             
@@ -387,7 +381,7 @@ class DashboardController extends Controller
             $validRowsCount = 0;
             $totalDailyRoi = 0;
             $dailyRoiCount = 0;
-            $totalRoiTrends = array_fill_keys([1, 2, 3, 5, 7, 14, 30, 40], ['sum' => 0, 'count' => 0]);
+            $totalRoiTrends = array_fill_keys([2, 3, 5, 7, 14, 30, 40], ['sum' => 0, 'count' => 0]);
             $totalRoiAfter40 = ['sum' => 0, 'count' => 0];
             
             // 初始化汇总变量

@@ -138,14 +138,13 @@
                         <td class="align-middle">{{ $summaryData['paying_users'] }}</td>
                         <td class="align-middle">${{ number_format($summaryData['first_deposit_price'] ?? 0, 2) }}</td>
                         <td class="align-middle">{{ number_format($summaryData['conversion_rate'], 2) }}%</td>
+                        
+                        <!-- 当日ROI数据 -->
                         <td class="align-middle {{ $summaryData['daily_roi'] > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                             {{ number_format($summaryData['daily_roi'], 2) }}%
                         </td>
                         
                         <!-- 汇总行的多日ROI数据 -->
-                        <td class="align-middle {{ ($summaryData['roi_trends'][1] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['roi_trends'][1] ?? 0, 2) }}%
-                        </td>
                         <td class="align-middle {{ ($summaryData['roi_trends'][2] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                             {{ number_format($summaryData['roi_trends'][2] ?? 0, 2) }}%
                         </td>
@@ -187,14 +186,13 @@
                             <td>{{ $row['paying_users'] }}</td>
                             <td>${{ number_format($row['first_deposit_price'] ?? 0, 2) }}</td>
                             <td>{{ number_format($row['conversion_rate'], 2) }}%</td>
+                            
+                            <!-- 当日ROI数据 -->
                             <td class="{{ $row['daily_roi'] > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['daily_roi'], 2) }}%
                             </td>
                             
-                            <!-- 多日ROI数据是从计算开始日期存储的，所以这里显示当天的多日ROI数据 -->
-                            <td class="{{ ($row['roi_trends'][1] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['roi_trends'][1] ?? 0, 2) }}%
-                            </td>
+                            <!-- 多日ROI数据 -->
                             <td class="{{ ($row['roi_trends'][2] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['roi_trends'][2] ?? 0, 2) }}%
                             </td>
@@ -270,7 +268,7 @@
 <script type="text/javascript">
     document.addEventListener('DOMContentLoaded', function() {
         // 获取日期数据
-        const dates = {!! json_encode($displayDates) !!};
+        const dates = JSON.parse('{!! json_encode($displayDates) !!}');
         
         // 格式化日期为更短的形式 (MM-DD)
         const formattedDates = dates.map(date => {
@@ -279,7 +277,7 @@
         }).reverse(); // 反转使日期左侧为旧日期，右侧为新日期
         
         // 获取图表数据并反转顺序，使其与日期对应
-        const chartSeries = {!! json_encode($chartSeries) !!};
+        const chartSeries = JSON.parse('{!! json_encode($chartSeries) !!}');
         chartSeries.forEach(series => {
             series.data = series.data.slice().reverse();
         });
