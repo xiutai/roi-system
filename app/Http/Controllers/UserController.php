@@ -40,54 +40,36 @@ class UserController extends Controller
     public function store(Request $request)
     {
         try {
-            // 获取用户输入数据
-            $name = $request->input('name');
-            $username = $request->input('username');
-            $email = $request->input('email');
-            $password = $request->input('password');
-            $password_confirmation = $request->input('password_confirmation');
-            $is_admin = $request->has('is_admin') ? true : false;
+            // 验证规则
+            $rules = [
+                'name' => 'required|string|max:255',
+                'username' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    'unique:users',
+                ],
+                'email' => [
+                    'nullable',
+                    'string',
+                    'email',
+                    'max:255',
+                    'unique:users',
+                ],
+                'password' => 'required|string|min:8|confirmed',
+                'is_admin' => 'boolean',
+            ];
 
-            // 手动验证
-            $errors = [];
-            
-            if (empty($name)) {
-                $errors['name'] = '姓名不能为空';
-            }
-            
-            if (empty($username)) {
-                $errors['username'] = '用户名不能为空';
-            } elseif (User::where('username', $username)->exists()) {
-                $errors['username'] = '用户名已被使用';
-            }
-            
-            if (!empty($email) && User::where('email', $email)->exists()) {
-                $errors['email'] = '邮箱已被使用';
-            }
-            
-            if (empty($password)) {
-                $errors['password'] = '密码不能为空';
-            } elseif (strlen($password) < 8) {
-                $errors['password'] = '密码长度不能少于8个字符';
-            } elseif ($password !== $password_confirmation) {
-                $errors['password'] = '两次输入的密码不一致';
-            }
-            
-            // 如果有验证错误，返回
-            if (!empty($errors)) {
-                return redirect()->back()
-                    ->withErrors($errors)
-                    ->withInput($request->except('password', 'password_confirmation'));
-            }
+            $request->validate($rules);
 
-            // 无错误，直接创建用户
-            $user = new User();
-            $user->name = $name;
-            $user->username = $username;
-            $user->email = $email;
-            $user->password = Hash::make($password);
-            $user->is_admin = $is_admin;
-            $user->save();
+            // 创建用户
+            $user = User::create([
+                'name' => $request->name,
+                'username' => $request->username,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'is_admin' => $request->has('is_admin') ? 1 : 0,
+            ]);
 
             // 记录用户创建日志
             Log::info('用户创建成功', [
@@ -143,62 +125,91 @@ class UserController extends Controller
      */
     public function update(Request $request, User $user)
     {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'username' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('users')->ignore($user->id),
-            ],
-            'email' => [
-                'nullable',
-                'string',
-                'email',
-                'max:255',
-                Rule::unique('users')->ignore($user->id),
-            ],
-            'password' => 'nullable|string|min:8|confirmed',
-            'is_admin' => 'boolean',
-        ]);
+        try {
+            // 验证规则
+            $rules = [
+                'name' => 'required|string|max:255',
+                'username' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    Rule::unique('users')->ignore($user->id),
+                ],
+                'email' => [
+                    'nullable',
+                    'string',
+                    'email',
+                    'max:255',
+                    Rule::unique('users')->ignore($user->id),
+                ],
+                'is_admin' => 'boolean',
+            ];
 
-        $data = [
-            'name' => $request->name,
-            'username' => $request->username,
-            'email' => $request->email,
-            'is_admin' => $request->has('is_admin') ? 1 : 0,
-        ];
+            // 如果提供了密码，添加密码验证规则
+            if ($request->filled('password')) {
+                $rules['password'] = 'required|string|min:8|confirmed';
+            }
 
-        if ($request->filled('password')) {
-            $data['password'] = Hash::make($request->password);
-        }
+            $request->validate($rules);
 
-        // 保存修改前的用户信息
-        $oldData = [
-            'name' => $user->name,
-            'username' => $user->username,
-            'email' => $user->email,
-            'is_admin' => $user->is_admin
-        ];
+            // 准备更新数据
+            $data = [
+                'name' => $request->name,
+                'username' => $request->username,
+                'email' => $request->email,
+                'is_admin' => $request->has('is_admin') ? 1 : 0,
+            ];
 
-        $user->update($data);
+            // 如果提供了新密码，更新密码
+            if ($request->filled('password')) {
+                $data['password'] = Hash::make($request->password);
+            }
 
-        // 记录用户更新日志
-        Log::info('用户信息已更新', [
-            'user_id' => $user->id,
-            'updated_by' => auth()->id(),
-            'old_data' => $oldData,
-            'new_data' => [
+            // 保存修改前的用户信息
+            $oldData = [
                 'name' => $user->name,
                 'username' => $user->username,
                 'email' => $user->email,
                 'is_admin' => $user->is_admin
-            ],
-            'password_changed' => $request->filled('password')
-        ]);
+            ];
 
-        return redirect()->route('users.index')
-            ->with('success', '用户已成功更新。');
+            // 更新用户信息
+            $user->update($data);
+
+            // 记录用户更新日志
+            Log::info('用户信息已更新', [
+                'user_id' => $user->id,
+                'updated_by' => auth()->id(),
+                'old_data' => $oldData,
+                'new_data' => [
+                    'name' => $user->name,
+                    'username' => $user->username,
+                    'email' => $user->email,
+                    'is_admin' => $user->is_admin
+                ],
+                'password_changed' => $request->filled('password')
+            ]);
+
+            // 设置成功消息
+            $message = '用户信息已成功更新。';
+            if ($request->filled('password')) {
+                $message = '用户信息已成功更新，密码已修改。';
+            }
+
+            return redirect()->route('users.index')
+                ->with('success', $message);
+
+        } catch (\Exception $e) {
+            Log::error('用户更新失败', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return redirect()->back()
+                ->withInput($request->except('password', 'password_confirmation'))
+                ->with('error', '更新用户信息时发生错误：' . $e->getMessage());
+        }
     }
 
     /**

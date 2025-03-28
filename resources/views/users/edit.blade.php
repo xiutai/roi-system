@@ -13,6 +13,13 @@
 @section('content')
 <div class="card">
     <div class="card-body">
+        @if(session('success'))
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="fas fa-check-circle me-2"></i>{{ session('success') }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        @endif
+
         <form action="{{ route('users.update', $user) }}" method="POST">
             @csrf
             @method('PUT')
@@ -45,7 +52,7 @@
             <div class="mb-3">
                 <label for="password" class="form-label">密码</label>
                 <input type="password" class="form-control @error('password') is-invalid @enderror" id="password" name="password">
-                <small class="form-text text-muted">留空表示不修改密码</small>
+                <small class="form-text text-muted">留空表示不修改密码，如需修改密码请确保密码长度不少于8个字符</small>
                 @error('password')
                     <div class="invalid-feedback">{{ $message }}</div>
                 @enderror
@@ -53,11 +60,14 @@
             
             <div class="mb-3">
                 <label for="password_confirmation" class="form-label">确认密码</label>
-                <input type="password" class="form-control" id="password_confirmation" name="password_confirmation">
+                <input type="password" class="form-control @error('password') is-invalid @enderror" id="password_confirmation" name="password_confirmation">
+                @error('password')
+                    <div class="invalid-feedback">{{ $message }}</div>
+                @enderror
             </div>
             
             <div class="mb-3 form-check">
-                <input type="checkbox" class="form-check-input" id="is_admin" name="is_admin" {{ old('is_admin', $user->is_admin) ? 'checked' : '' }}>
+                <input type="checkbox" class="form-check-input" id="is_admin" name="is_admin" value="1" {{ old('is_admin', $user->is_admin) ? 'checked' : '' }}>
                 <label class="form-check-label" for="is_admin">设为管理员</label>
                 <small class="form-text text-muted d-block">管理员可以管理所有用户。</small>
             </div>
