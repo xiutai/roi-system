@@ -119,21 +119,15 @@ class DashboardController extends Controller
             $expensesData = [];
             foreach ($expensesByDate as $expense) {
                 $dateStr = $expense->date->format('Y-m-d');
-                $channelId = $expense->channel_id;
-                
                 if (!isset($expensesData[$dateStr])) {
-                    $expensesData[$dateStr] = [];
+                    $expensesData[$dateStr] = 0;
                 }
-                
-                $expensesData[$dateStr][$channelId] = $expense->amount;
+                $expensesData[$dateStr] += $expense->amount;
             }
             
             // 获取默认消耗数据
             $defaultExpenses = Expense::where('is_default', true)->get();
-            $defaultExpensesByChannel = [];
-            foreach ($defaultExpenses as $expense) {
-                $defaultExpensesByChannel[$expense->channel_id] = $expense->amount;
-            }
+            $totalDefaultExpense = $defaultExpenses->sum('amount');
             
             // 获取汇率数据
             $ratesByDate = ExchangeRate::whereBetween('date', [$startDateStr, $endDateStr])
@@ -148,16 +142,33 @@ class DashboardController extends Controller
             
             // 计算每日统计数据和ROI
             $dailyStats = [];
+            $summaryData = [
+                'date' => '汇总',
+                'registrations' => 0,
+                'expense' => 0,
+                'balance' => 0,
+                'paying_users' => 0,
+                'conversion_rate' => 0,
+                'arpu' => 0,
+                'cpa' => 0,
+                'daily_roi' => 0,
+                'first_deposit_price' => 0,
+                'roi_trends' => array_fill_keys([2, 3, 5, 7, 14, 30, 40], 0),
+                'roi_after_40' => 0
+            ];
             
             foreach ($dates as $dateStr) {
                 // 获取当天的基础统计数据
                 $stats = $statsByDate[$dateStr] ?? null;
                 
+                // 获取或计算当天的消耗
+                $totalExpenseToday = $expensesData[$dateStr] ?? $totalDefaultExpense;
+                
                 if (!$stats) {
                     $dailyStats[$dateStr] = [
                         'date' => $dateStr,
                         'registrations' => 0,
-                        'expense' => 0,
+                        'expense' => $totalExpenseToday,
                         'balance' => 0,
                         'paying_users' => 0,
                         'conversion_rate' => 0,
@@ -175,23 +186,6 @@ class DashboardController extends Controller
                 $registrationCount = $stats['registrations'];
                 $payingUsers = $stats['deposit_users'];
                 $totalBalanceToday = $stats['balance'];
-                
-                // 计算此日期的总消耗（所有渠道）
-                $totalExpenseToday = 0;
-                
-                // 检查是否有为当天设置的消耗数据
-                if (isset($expensesData[$dateStr])) {
-                    foreach ($expensesData[$dateStr] as $channelId => $amount) {
-                        $totalExpenseToday += $amount;
-                    }
-                } else {
-                    // 使用默认消耗
-                    foreach ($defaultExpensesByChannel as $channelId => $amount) {
-                        if (isset($stats['channels'][$channelId])) {
-                            $totalExpenseToday += $amount;
-                        }
-                    }
-                }
                 
                 // 获取当天的汇率
                 $rateValue = isset($ratesByDate[$dateStr]) ? $ratesByDate[$dateStr]->rate : $defaultRateValue;
@@ -212,6 +206,12 @@ class DashboardController extends Controller
                 if ($calculateRoi) {
                     $roiToday = ($totalBalanceToday / $rateValue) / $totalExpenseToday * 100;
                 }
+                
+                // 更新汇总数据
+                $summaryData['registrations'] += $registrationCount;
+                $summaryData['expense'] += $totalExpenseToday;
+                $summaryData['balance'] += $totalBalanceToday;
+                $summaryData['paying_users'] += $payingUsers;
                 
                 // 初始化每日统计
                 $dailyStats[$dateStr] = [
