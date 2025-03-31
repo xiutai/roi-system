@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Expense;
 use App\Models\Channel;
+use App\Models\DailyStatistic;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class ExpenseController extends Controller
 {
@@ -79,12 +81,18 @@ class ExpenseController extends Controller
             return back()->with('error', '该日期和渠道的消耗记录已存在。');
         }
         
-        Expense::create([
+        $expense = Expense::create([
             'date' => $request->input('date'),
             'channel_id' => $request->input('channel_id'),
             'amount' => $request->input('amount'),
             'is_default' => false,
         ]);
+
+        // 触发 ROI 重新计算
+        \App\Models\RoiCalculation::batchCalculateRois(
+            [$request->input('date')],
+            [$request->input('channel_id')]
+        );
         
         return redirect()->route('expenses.index')->with('success', '消耗添加成功。');
     }
@@ -118,6 +126,12 @@ class ExpenseController extends Controller
         $expense->update([
             'amount' => $request->input('amount'),
         ]);
+
+        // 触发 ROI 重新计算
+        \App\Models\RoiCalculation::batchCalculateRois(
+            [$expense->date->format('Y-m-d')],
+            [$expense->channel_id]
+        );
         
         return redirect()->route('expenses.index')->with('success', '消耗更新成功。');
     }
@@ -146,6 +160,29 @@ class ExpenseController extends Controller
                 'amount' => $request->input('default_amount'),
             ]
         );
+
+        // 获取所有使用默认消耗的日期
+        $dates = \App\Models\DailyStatistic::where('channel_id', $request->input('channel_id'))
+            ->whereNotExists(function ($query) use ($request) {
+                $query->select(\DB::raw(1))
+                    ->from('expenses')
+                    ->whereColumn('expenses.date', 'daily_statistics.date')
+                    ->where('expenses.channel_id', $request->input('channel_id'))
+                    ->where('expenses.is_default', false);
+            })
+            ->pluck('date')
+            ->map(function ($date) {
+                return $date->format('Y-m-d');
+            })
+            ->toArray();
+
+        // 触发 ROI 重新计算
+        if (!empty($dates)) {
+            \App\Models\RoiCalculation::batchCalculateRois(
+                $dates,
+                [$request->input('channel_id')]
+            );
+        }
         
         return redirect()->route('expenses.index')->with('success', '默认消耗已更新。');
     }
@@ -170,10 +207,14 @@ class ExpenseController extends Controller
         $channelId = $request->input('channel_id');
         $amount = $request->input('amount');
         
+        $dates = [];
         for ($date = clone $startDate; $date->lte($endDate); $date->addDay()) {
+            $dateStr = $date->format('Y-m-d');
+            $dates[] = $dateStr;
+            
             Expense::updateOrCreate(
                 [
-                    'date' => $date->format('Y-m-d'),
+                    'date' => $dateStr,
                     'channel_id' => $channelId,
                 ],
                 [
@@ -182,6 +223,12 @@ class ExpenseController extends Controller
                 ]
             );
         }
+
+        // 触发 ROI 重新计算
+        \App\Models\RoiCalculation::batchCalculateRois(
+            $dates,
+            [$channelId]
+        );
         
         return redirect()->route('expenses.index')->with('success', '消耗批量设置成功。');
     }
