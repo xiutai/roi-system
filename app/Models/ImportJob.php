@@ -24,9 +24,12 @@ class ImportJob extends Model
         'inserted_rows',
         'updated_rows',
         'error_rows',
+        'replaced_rows',
         'error_message',
         'error_details',
         'user_id',
+        'insert_date',
+        'is_replacing_existing',
         'started_at',
         'completed_at',
     ];
@@ -39,6 +42,7 @@ class ImportJob extends Model
     protected $dates = [
         'started_at',
         'completed_at',
+        'insert_date',
     ];
 
     /**

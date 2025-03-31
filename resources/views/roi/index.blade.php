@@ -6,9 +6,15 @@
 
 @section('page-actions')
 @if(isset($hasFilters) && $hasFilters)
-<a href="{{ route('roi.index', ['refresh' => true] + request()->all()) }}" class="btn btn-sm btn-primary">
-    <i class="fas fa-sync-alt me-1"></i> 刷新数据
-</a>
+<form action="{{ route('roi.recalculate') }}" method="POST" style="display: inline;">
+    @csrf
+    <input type="hidden" name="start_date" value="{{ $startDate }}">
+    <input type="hidden" name="end_date" value="{{ $endDate }}">
+    <input type="hidden" name="channel_id" value="{{ $channelId }}">
+    <button type="submit" class="btn btn-sm btn-primary">
+        <i class="fas fa-sync-alt me-1"></i> 刷新数据
+    </button>
+</form>
 @endif
 @endsection
 
@@ -104,33 +110,33 @@
                             <td class="align-middle">${{ number_format($summaryData['first_deposit_price'] ?? 0, 2) }}</td>
                             <td class="align-middle">{{ number_format($summaryData['conversion_rate'], 2) }}%</td>
                             <td class="align-middle {{ $summaryData['daily_roi'] > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($summaryData['daily_roi'], 2) }}%
+                                {{ $summaryData['daily_roi'] }}%
                             </td>
                             
                             <!-- 汇总行的多日ROI数据 -->
                             <td class="align-middle {{ ($summaryData['roi_trends'][2] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($summaryData['roi_trends'][2] ?? 0, 2) }}%
+                                {{ $summaryData['roi_trends'][2] ?? 0 }}%
                             </td>
                             <td class="align-middle {{ ($summaryData['roi_trends'][3] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($summaryData['roi_trends'][3] ?? 0, 2) }}%
+                                {{ $summaryData['roi_trends'][3] ?? 0 }}%
                             </td>
                             <td class="align-middle {{ ($summaryData['roi_trends'][5] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($summaryData['roi_trends'][5] ?? 0, 2) }}%
+                                {{ $summaryData['roi_trends'][5] ?? 0 }}%
                             </td>
                             <td class="align-middle {{ ($summaryData['roi_trends'][7] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($summaryData['roi_trends'][7] ?? 0, 2) }}%
+                                {{ $summaryData['roi_trends'][7] ?? 0 }}%
                             </td>
                             <td class="align-middle {{ ($summaryData['roi_trends'][14] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($summaryData['roi_trends'][14] ?? 0, 2) }}%
+                                {{ $summaryData['roi_trends'][14] ?? 0 }}%
                             </td>
                             <td class="align-middle {{ ($summaryData['roi_trends'][30] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($summaryData['roi_trends'][30] ?? 0, 2) }}%
+                                {{ $summaryData['roi_trends'][30] ?? 0 }}%
                             </td>
                             <td class="align-middle {{ ($summaryData['roi_trends'][40] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($summaryData['roi_trends'][40] ?? 0, 2) }}%
+                                {{ $summaryData['roi_trends'][40] ?? 0 }}%
                             </td>
                             <td class="align-middle {{ ($summaryData['roi_after_40'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($summaryData['roi_after_40'] ?? 0, 2) }}%
+                                {{ $summaryData['roi_after_40'] ?? 0 }}%
                             </td>
                         </tr>
                         @endif
@@ -152,33 +158,33 @@
                                     <td>${{ number_format($row['first_deposit_price'] ?? 0, 2) }}</td>
                                     <td>{{ number_format($row['conversion_rate'], 2) }}%</td>
                                     <td class="{{ $row['daily_roi'] > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                        {{ number_format($row['daily_roi'], 2) }}%
+                                        {{ $row['daily_roi'] }}%
                                     </td>
                                     
                                     <!-- 多日ROI数据 -->
                                     <td class="{{ ($row['roi_trends'][2] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                        {{ number_format($row['roi_trends'][2] ?? 0, 2) }}%
+                                        {{ $row['roi_trends'][2] ?? 0 }}%
                                     </td>
                                     <td class="{{ ($row['roi_trends'][3] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                        {{ number_format($row['roi_trends'][3] ?? 0, 2) }}%
+                                        {{ $row['roi_trends'][3] ?? 0 }}%
                                     </td>
                                     <td class="{{ ($row['roi_trends'][5] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                        {{ number_format($row['roi_trends'][5] ?? 0, 2) }}%
+                                        {{ $row['roi_trends'][5] ?? 0 }}%
                                     </td>
                                     <td class="{{ ($row['roi_trends'][7] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                        {{ number_format($row['roi_trends'][7] ?? 0, 2) }}%
+                                        {{ $row['roi_trends'][7] ?? 0 }}%
                                     </td>
                                     <td class="{{ ($row['roi_trends'][14] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                        {{ number_format($row['roi_trends'][14] ?? 0, 2) }}%
+                                        {{ $row['roi_trends'][14] ?? 0 }}%
                                     </td>
                                     <td class="{{ ($row['roi_trends'][30] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                        {{ number_format($row['roi_trends'][30] ?? 0, 2) }}%
+                                        {{ $row['roi_trends'][30] ?? 0 }}%
                                     </td>
                                     <td class="{{ ($row['roi_trends'][40] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                        {{ number_format($row['roi_trends'][40] ?? 0, 2) }}%
+                                        {{ $row['roi_trends'][40] ?? 0 }}%
                                     </td>
                                     <td class="{{ ($row['roi_after_40'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                        {{ number_format($row['roi_after_40'] ?? 0, 2) }}%
+                                        {{ $row['roi_after_40'] ?? 0 }}%
                                     </td>
                                 </tr>
                                 @endif

@@ -83,10 +83,38 @@
 <!-- ROI趋势图 -->
 <div class="card mb-4">
     <div class="card-body">
-        <h5 class="card-title">
-            <i class="fas fa-chart-line me-2"></i>ROI趋势图
-        </h5>
-        <div style="height: 400px;">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-chart-line me-2"></i>ROI趋势图 
+                @if(isset($selectedChannelName))
+                    <span class="badge bg-primary">{{ $selectedChannelName }}</span>
+                @endif
+                @if(isset($startDateStr) && isset($endDateStr))
+                    <span class="badge bg-info text-white">{{ $startDateStr }} 至 {{ $endDateStr }}</span>
+                @endif
+            </h5>
+            <div>
+                @if($hasFilters ?? false)
+                    <a href="{{ route('dashboard') }}" class="btn btn-sm btn-outline-secondary me-2">
+                        <i class="fas fa-times me-1"></i> 清除筛选
+                    </a>
+                @endif
+                <form action="{{ route('dashboard.refresh') }}" method="POST" style="display: inline;">
+                    @csrf
+                    @if(isset($channelId))
+                        <input type="hidden" name="channel_id" value="{{ $channelId }}">
+                    @endif
+                    @if(isset($startDateStr) && isset($endDateStr))
+                        <input type="hidden" name="daterange" value="{{ $startDateStr }} - {{ $endDateStr }}">
+                    @endif
+                    <input type="hidden" name="hasFilters" value="{{ $hasFilters ?? '' }}">
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="fas fa-sync-alt me-1"></i> 刷新数据
+                    </button>
+                </form>
+            </div>
+        </div>
+        <div class="chart-container">
             <canvas id="roiChart"></canvas>
         </div>
     </div>
@@ -95,14 +123,70 @@
 <!-- 汇总ROI数据表 -->
 <div class="card">
     <div class="card-body">
-        <h5 class="card-title">
-            <i class="fas fa-table me-2"></i>ROI数据（全部渠道汇总）
-        </h5>
-        
-        <div class="alert alert-info bg-light-info border-0">
-            <i class="fas fa-info-circle me-2 text-info"></i>
-            查看单个渠道的详细数据，请前往 <a href="{{ route('roi.index') }}" class="alert-link text-info">ROI分析</a> 页面进行筛选。
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="card-title">
+                <i class="fas fa-table me-2"></i>ROI数据
+                @if(isset($selectedChannelName))
+                    <span class="badge bg-primary">{{ $selectedChannelName }}</span>
+                @endif
+            </h5>
+            <div>
+                @if($hasFilters ?? false)
+                    <a href="{{ route('dashboard') }}" class="btn btn-sm btn-outline-secondary me-2">
+                        <i class="fas fa-times me-1"></i> 清除筛选
+                    </a>
+                @endif
+                <form action="{{ route('dashboard.refresh') }}" method="POST" style="display: inline;">
+                    @csrf
+                    @if(isset($channelId))
+                        <input type="hidden" name="channel_id" value="{{ $channelId }}">
+                    @endif
+                    @if(isset($startDateStr) && isset($endDateStr))
+                        <input type="hidden" name="daterange" value="{{ $startDateStr }} - {{ $endDateStr }}">
+                    @endif
+                    <input type="hidden" name="hasFilters" value="{{ $hasFilters ?? '' }}">
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="fas fa-sync-alt me-1"></i> 刷新数据
+                    </button>
+                </form>
+            </div>
         </div>
+        
+        <form id="filterForm" action="{{ route('dashboard') }}" method="GET" class="row g-3 mb-4">
+            <div class="col-md-4">
+                <label for="channel_id" class="form-label">渠道筛选</label>
+                <select class="form-select" id="channel_id" name="channel_id">
+                    <option value="">全部渠道</option>
+                    @foreach($channels ?? [] as $channel)
+                        <option value="{{ $channel->id }}" {{ (isset($channelId) && $channelId == $channel->id) ? 'selected' : '' }}>
+                            {{ $channel->name }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="daterange" class="form-label">日期范围</label>
+                <div class="input-group">
+                    <span class="input-group-text"><i class="fas fa-calendar"></i></span>
+                    <input type="text" class="form-control" id="daterangepicker" name="daterange" 
+                           value="{{ isset($startDateStr) && isset($endDateStr) ? $startDateStr . ' - ' . $endDateStr : '' }}"
+                           placeholder="选择日期范围">
+                </div>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <input type="hidden" name="hasFilters" value="1">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-filter me-1"></i> 应用筛选
+                </button>
+            </div>
+        </form>
+        
+        @if(!isset($channelId))
+        <div class="alert alert-info bg-light-info border-0 mb-4">
+            <i class="fas fa-info-circle me-2 text-info"></i>
+            查看单个渠道的详细数据，请前往 <a href="{{ route('roi.index') }}" class="alert-link text-info">ROI分析</a> 页面进行筛选或使用上方筛选功能。
+        </div>
+        @endif
         
         <div class="table-responsive">
             <table class="table table-striped table-hover">
@@ -131,7 +215,7 @@
                     <!-- 首先显示汇总行 -->
                     <tr class="table-secondary fw-bold">
                         <td class="align-middle">{{ $summaryData['date'] }}</td>
-                        <td class="align-middle">全部渠道</td>
+                        <td class="align-middle">{{ $selectedChannelName ?? '全部渠道' }}</td>
                         <td class="align-middle">${{ number_format($summaryData['expense'], 2) }}</td>
                         <td class="align-middle">{{ $summaryData['registrations'] }}</td>
                         <td class="align-middle">${{ number_format($summaryData['cpa'], 2) }}</td>
@@ -140,8 +224,8 @@
                         <td class="align-middle">{{ number_format($summaryData['conversion_rate'], 2) }}%</td>
                         
                         <!-- 当日ROI数据 -->
-                        <td class="align-middle {{ $summaryData['daily_roi'] > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['daily_roi'], 2) }}%
+                        <td class="align-middle {{ ($summaryData['daily_roi'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                            {{ number_format($summaryData['daily_roi'] ?? 0, 2) }}%
                         </td>
                         
                         <!-- 汇总行的多日ROI数据 -->
@@ -172,14 +256,10 @@
                     </tr>
                     
                     <!-- 然后显示每日数据行 -->
-                    @forelse($displayDates as $dateStr)
-                        @php
-                            $row = $dailyStats[$dateStr] ?? null;
-                        @endphp
-                        @if($row)
+                    @forelse($dailyStats as $dateStr => $row)
                         <tr>
                             <td>{{ $dateStr }}</td>
-                            <td>全部渠道</td>
+                            <td>{{ $selectedChannelName ?? '全部渠道' }}</td>
                             <td>${{ number_format($row['expense'], 2) }}</td>
                             <td>{{ $row['registrations'] }}</td>
                             <td>${{ number_format($row['cpa'], 2) }}</td>
@@ -188,37 +268,36 @@
                             <td>{{ number_format($row['conversion_rate'], 2) }}%</td>
                             
                             <!-- 当日ROI数据 -->
-                            <td class="{{ $row['daily_roi'] > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['daily_roi'], 2) }}%
+                            <td class="align-middle {{ ($row['daily_roi'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                                {{ number_format($row['daily_roi'] ?? 0, 2) }}%
                             </td>
                             
                             <!-- 多日ROI数据 -->
-                            <td class="{{ ($row['roi_trends'][2] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                            <td class="align-middle {{ ($row['roi_trends'][2] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['roi_trends'][2] ?? 0, 2) }}%
                             </td>
-                            <td class="{{ ($row['roi_trends'][3] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                            <td class="align-middle {{ ($row['roi_trends'][3] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['roi_trends'][3] ?? 0, 2) }}%
                             </td>
-                            <td class="{{ ($row['roi_trends'][5] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                            <td class="align-middle {{ ($row['roi_trends'][5] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['roi_trends'][5] ?? 0, 2) }}%
                             </td>
-                            <td class="{{ ($row['roi_trends'][7] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                            <td class="align-middle {{ ($row['roi_trends'][7] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['roi_trends'][7] ?? 0, 2) }}%
                             </td>
-                            <td class="{{ ($row['roi_trends'][14] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                            <td class="align-middle {{ ($row['roi_trends'][14] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['roi_trends'][14] ?? 0, 2) }}%
                             </td>
-                            <td class="{{ ($row['roi_trends'][30] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                            <td class="align-middle {{ ($row['roi_trends'][30] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['roi_trends'][30] ?? 0, 2) }}%
                             </td>
-                            <td class="{{ ($row['roi_trends'][40] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                            <td class="align-middle {{ ($row['roi_trends'][40] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['roi_trends'][40] ?? 0, 2) }}%
                             </td>
-                            <td class="{{ ($row['roi_after_40'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
+                            <td class="align-middle {{ ($row['roi_after_40'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
                                 {{ number_format($row['roi_after_40'] ?? 0, 2) }}%
                             </td>
                         </tr>
-                        @endif
                     @empty
                         <tr>
                             <td colspan="17" class="text-center py-5">
@@ -235,6 +314,7 @@
 @endsection
 
 @section('styles')
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
 <style>
     .bg-gradient-primary {
         background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
@@ -261,14 +341,31 @@
         padding: 12px;
         vertical-align: middle;
     }
+    .chart-container {
+        position: relative;
+        height: 400px;
+        width: 100%;
+    }
 </style>
 @endsection
 
 @section('scripts')
+<script src="https://cdn.jsdelivr.net/npm/moment/moment.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
 <script type="text/javascript">
     document.addEventListener('DOMContentLoaded', function() {
+        // 检查Chart.js库是否正确加载
+        if (typeof Chart === 'undefined') {
+            console.error('Chart.js库未加载，请检查相关依赖！');
+            return;
+        }
+        
         // 获取日期数据
-        const dates = JSON.parse('{!! json_encode($displayDates) !!}');
+        const dates = JSON.parse('{!! json_encode($actualDisplayDates ?? []) !!}');
+        
+        // 调试日期数据
+        console.log('Chart dates:', dates);
         
         // 格式化日期为更短的形式 (MM-DD)
         const formattedDates = dates.map(date => {
@@ -278,9 +375,16 @@
         
         // 获取图表数据并反转顺序，使其与日期对应
         const chartSeries = JSON.parse('{!! json_encode($chartSeries) !!}');
+        
+        // 调试图表数据
+        console.log('Chart series before:', chartSeries);
+        
         chartSeries.forEach(series => {
-            series.data = series.data.slice().reverse();
+            series.data = series.data.slice();
         });
+        
+        // 调试处理后的图表数据
+        console.log('Chart series after:', chartSeries);
         
         // 设置颜色 - 参考图1的配色方案
         const colors = [
@@ -292,7 +396,6 @@
             'rgba(245, 34, 45, 1)',     // 14日ROI - 红色
             'rgba(19, 194, 194, 1)',    // 30日ROI - 青色
             'rgba(82, 196, 26, 1)',     // 40日ROI - 浅绿色
-            'rgba(245, 102, 0, 1)'      // 40日后ROI - 橙色
         ];
         
         // 准备数据集
@@ -301,18 +404,32 @@
                 label: series.name,
                 data: series.data,
                 borderColor: colors[index % colors.length],
-                backgroundColor: 'transparent',
+                backgroundColor: colors[index % colors.length].replace('1)', '0.1)'),
                 borderWidth: 2,
-                pointRadius: 3,
-                pointHoverRadius: 5,
-                tension: 0.1,
-                fill: false
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                tension: 0.2
             };
         });
         
         // 创建图表
-        const ctx = document.getElementById('roiChart').getContext('2d');
-        new Chart(ctx, {
+        const ctx = document.getElementById('roiChart');
+        
+        if (!ctx) {
+            console.error('无法找到图表容器元素 #roiChart');
+            return;
+        }
+        
+        // 确保DOM元素正确获取
+        console.log('Chart container:', ctx);
+        
+        // 清除可能的旧图表实例
+        if (window.roiChartInstance) {
+            window.roiChartInstance.destroy();
+        }
+        
+        // 简化图表配置
+        window.roiChartInstance = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: formattedDates,
@@ -322,34 +439,7 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: {
-                        position: 'top',
-                        align: 'center',
-                        labels: {
-                            boxWidth: 12,
-                            usePointStyle: true,
-                            pointStyle: 'circle'
-                        }
-                    },
                     tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                        titleColor: '#fff',
-                        bodyColor: '#fff',
-                        titleFont: {
-                            size: 14,
-                            weight: 'bold'
-                        },
-                        bodyFont: {
-                            size: 13
-                        },
-                        padding: 10,
-                        cornerRadius: 5,
-                        displayColors: true,
-                        usePointStyle: true,
-                        borderColor: 'rgba(255, 255, 255, 0.2)',
-                        borderWidth: 1,
                         callbacks: {
                             label: function(context) {
                                 return context.dataset.label + ': ' + context.raw.toFixed(2) + '%';
@@ -358,35 +448,13 @@
                     }
                 },
                 scales: {
-                    x: {
-                        grid: {
-                            display: false
-                        },
-                        ticks: {
-                            color: '#6c757d'
-                        }
-                    },
                     y: {
-                        grid: {
-                            color: 'rgba(0, 0, 0, 0.05)',
-                            drawBorder: false
-                        },
                         ticks: {
-                            color: '#6c757d',
                             callback: function(value) {
                                 return value + '%';
                             }
                         }
                     }
-                },
-                interaction: {
-                    mode: 'nearest',
-                    axis: 'x',
-                    intersect: false
-                },
-                hover: {
-                    mode: 'nearest',
-                    intersect: false
                 }
             }
         });

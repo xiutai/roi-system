@@ -23,6 +23,7 @@ class Transaction extends Model
         'registration_source',
         'registration_time',
         'balance_difference',
+        'insert_date',
     ];
 
     /**
@@ -32,6 +33,7 @@ class Transaction extends Model
      */
     protected $dates = [
         'registration_time',
+        'insert_date',
     ];
 
     /**

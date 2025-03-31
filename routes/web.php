@@ -40,6 +40,7 @@ Route::get('/home', function() {
 Route::middleware(['auth'])->group(function () {
     // 仪表盘
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::post('/dashboard/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');
 
     // Excel导入
     Route::get('/import', [ImportController::class, 'index'])->name('import.index');

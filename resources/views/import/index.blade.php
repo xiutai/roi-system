@@ -25,6 +25,14 @@
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
                     </div>
+                    <div class="mb-3">
+                        <label for="insert_date" class="form-label">选择插入日期 <small class="text-muted">(默认为今天)</small></label>
+                        <input type="date" class="form-control @error('insert_date') is-invalid @enderror" id="insert_date" name="insert_date" value="{{ date('Y-m-d') }}">
+                        <div class="form-text">如果选择的日期已有数据，新导入的数据将会替换相同日期的旧数据。</div>
+                        @error('insert_date')
+                            <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                    </div>
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-upload"></i> 导入数据
                     </button>
@@ -71,6 +79,7 @@
                         <tr>
                             <th>ID</th>
                             <th>文件名</th>
+                            <th>插入日期</th>
                             <th>状态</th>
                             <th>进度</th>
                             <th>开始时间</th>
@@ -83,6 +92,7 @@
                             <tr>
                                 <td>{{ $job->id }}</td>
                                 <td>{{ $job->original_filename }}</td>
+                                <td>{{ $job->insert_date ? $job->insert_date->format('Y-m-d') : '未设置' }}</td>
                                 <td>
                                     @if($job->status == 'pending')
                                         <span class="badge bg-secondary">等待中</span>
@@ -96,13 +106,17 @@
                                 </td>
                                 <td>
                                     <div class="progress">
-                                        <div class="progress-bar {{ $job->status == 'failed' ? 'bg-danger' : '' }}" 
+                                        @php
+                                        $progressBarClass = $job->status == 'failed' ? 'progress-bar bg-danger' : 'progress-bar';
+                                        $progressWidth = $job->progress_percentage;
+                                        @endphp
+                                        <div class="{{ $progressBarClass }}" 
                                              role="progressbar" 
-                                             style="width: {{ $job->progress_percentage }}%"
-                                             aria-valuenow="{{ $job->progress_percentage }}" 
+                                             style="width: {{ $progressWidth }}%"
+                                             aria-valuenow="{{ $progressWidth }}" 
                                              aria-valuemin="0" 
                                              aria-valuemax="100">
-                                            {{ $job->progress_percentage }}%
+                                            {{ $progressWidth }}%
                                         </div>
                                     </div>
                                 </td>

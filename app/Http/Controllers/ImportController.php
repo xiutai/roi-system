@@ -51,18 +51,52 @@ class ImportController extends Controller
     {
         $request->validate([
             'excel_file' => 'required|file|mimes:xlsx,xls,csv,txt',
+            'insert_date' => 'nullable|date',
         ]);
 
         try {
             $file = $request->file('excel_file');
+            if (!$file) {
+                return back()->with('error', '未能获取上传的文件');
+            }
+            
             $originalFilename = $file->getClientOriginalName();
             $extension = $file->getClientOriginalExtension();
             
+            // 确保文件扩展名有效
+            if (!in_array(strtolower($extension), ['xlsx', 'xls', 'csv', 'txt'])) {
+                return back()->with('error', '不支持的文件类型: ' . $extension);
+            }
+            
+            // 确保storage/app/imports目录存在
+            $importDir = storage_path('app/imports');
+            if (!file_exists($importDir)) {
+                if (!mkdir($importDir, 0755, true)) {
+                    return back()->with('error', '无法创建导入目录，请检查权限');
+                }
+            }
+            
             // 生成唯一文件名
             $filename = Str::uuid() . '.' . $extension;
+            $fullPath = $importDir . '/' . $filename;
             
-            // 将文件保存到storage/app/imports目录
-            $file->storeAs('imports', $filename);
+            // 直接使用PHP的文件函数移动上传的文件
+            if (!move_uploaded_file($file->getRealPath(), $fullPath)) {
+                return back()->with('error', '文件保存失败，请检查存储权限');
+            }
+            
+            // 验证文件是否可读
+            if (!is_readable($fullPath)) {
+                return back()->with('error', '保存的文件无法读取，请检查权限');
+            }
+            
+            // 获取插入日期，默认为当天
+            $insertDate = $request->filled('insert_date') 
+                ? Carbon::parse($request->input('insert_date'))->format('Y-m-d')
+                : Carbon::now()->format('Y-m-d');
+            
+            // 检查是否存在相同insert_date的数据
+            $isReplacingExisting = Transaction::where('insert_date', $insertDate)->exists();
             
             // 创建导入任务记录
             $importJob = ImportJob::create([
@@ -70,13 +104,31 @@ class ImportController extends Controller
                 'original_filename' => $originalFilename,
                 'status' => 'pending',
                 'user_id' => Auth::id(),
+                'insert_date' => $insertDate,
+                'is_replacing_existing' => $isReplacingExisting,
+            ]);
+            
+            // 检查记录是否成功创建
+            if (!$importJob || !$importJob->id) {
+                // 删除已上传的文件
+                @unlink($fullPath);
+                return back()->with('error', '创建导入任务记录失败');
+            }
+            
+            // 记录日志
+            Log::info('导入任务创建成功', [
+                'job_id' => $importJob->id,
+                'filename' => $filename,
+                'original_filename' => $originalFilename,
+                'insert_date' => $insertDate
             ]);
             
             // 分发异步任务处理导入
             ProcessImport::dispatch($importJob);
             
             return redirect()->route('import.index')->with('success', 
-                "文件已上传，正在后台处理导入。您可以在导入记录中查看进度。"
+                "文件已上传，正在后台处理导入。您可以在导入记录中查看进度。" . 
+                ($isReplacingExisting ? "注意：将会替换已有的 {$insertDate} 数据。" : "")
             );
         } catch (\Exception $e) {
             Log::error('文件上传失败', [
@@ -99,7 +151,7 @@ class ImportController extends Controller
         $importJob = ImportJob::findOrFail($id);
         
         // 检查是否为当前用户的导入任务
-        if ($importJob->user_id !== Auth::id() && !Auth::user()->isAdmin()) {
+        if ($importJob->user_id !== Auth::id()) {
             abort(403, '您无权查看此导入任务');
         }
         
@@ -117,7 +169,7 @@ class ImportController extends Controller
         $importJob = ImportJob::findOrFail($id);
         
         // 检查是否为当前用户的导入任务
-        if ($importJob->user_id !== Auth::id() && !Auth::user()->isAdmin()) {
+        if ($importJob->user_id !== Auth::id()) {
             return response()->json(['error' => '您无权查看此导入任务'], 403);
         }
         
@@ -207,7 +259,7 @@ class ImportController extends Controller
         $importJob = ImportJob::findOrFail($id);
         
         // 检查是否为当前用户的导入任务
-        if ($importJob->user_id !== Auth::id() && !Auth::user()->isAdmin()) {
+        if ($importJob->user_id !== Auth::id()) {
             abort(403, '您无权删除此导入任务');
         }
         

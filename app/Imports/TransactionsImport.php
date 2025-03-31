@@ -203,6 +203,18 @@ class TransactionsImport implements ToModel, WithHeadingRow, WithValidation, Wit
             return $str;
         }
         
+        // 处理Excel导出的特殊格式 ="xxx"
+        if (preg_match('/^="(.*)"$/', $str, $matches)) {
+            $str = $matches[1];
+            // 对于处理过的字符串记录日志（仅在调试需要时启用）
+            Log::debug('处理Excel特殊格式', ['original' => $str, 'processed' => $matches[1]]);
+        }
+        
+        // 处理可能的双重引号
+        if (strpos($str, '""') !== false) {
+            $str = str_replace('""', '"', $str);
+        }
+        
         // 尝试转换编码
         if (!mb_check_encoding($str, 'UTF-8')) {
             $encodings = ['GB2312', 'GBK', 'GB18030', 'ISO-8859-1', 'Windows-1252'];

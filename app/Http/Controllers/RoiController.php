@@ -11,6 +11,7 @@ use App\Models\Expense;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 
 class RoiController extends Controller
 {
@@ -342,12 +343,39 @@ class RoiController extends Controller
                             continue;
                         }
                         
-                        // 只有当天数足够时才执行查询计算
-                        $startDate = Carbon::parse($dateStr)->startOfDay();
-                        $endDateForQuery = Carbon::parse($dateStr)->addDays($days - 1)->endOfDay();
+                        // 计算应该使用哪一天的数据来计算ROI
+                        // N日ROI需要使用(注册日期+N)这一天上传的数据
+                        $dataDate = Carbon::parse($dateStr)->addDays($days)->format('Y-m-d');
                         
-                        $query = Transaction::whereBetween('registration_time', [$startDate, $endDateForQuery]);
+                        // 检查是否存在该日期的数据
+                        $hasData = Transaction::where('insert_date', $dataDate)->exists();
                         
+                        // 如果不存在该日期的数据且不是40日后的ROI，则不计算
+                        if (!$hasData && $days < 40) {
+                            // 更新dailyStats中的ROI趋势数据为0
+                            if (isset($dailyStats[$dateStr])) {
+                                $dailyStats[$dateStr]['roi_trends'][$days] = 0;
+                            }
+                            continue;
+                        }
+                        
+                        // 如果是40日后的ROI，则使用最新一天的数据
+                        if ($days >= 40) {
+                            $latestDate = Transaction::max('insert_date');
+                            if (!$latestDate) {
+                                // 更新dailyStats中的ROI趋势数据为0
+                                if (isset($dailyStats[$dateStr])) {
+                                    $dailyStats[$dateStr]['roi_trends'][$days] = 0;
+                                }
+                                continue;
+                            }
+                            $dataDate = Carbon::parse($latestDate)->format('Y-m-d');
+                        }
+                        
+                        // 获取该渠道在该起始日期注册的用户在数据日期的充提差额总和
+                        $query = Transaction::where('insert_date', $dataDate)
+                            ->whereDate('registration_time', $dateStr);
+                            
                         // 如果指定了渠道，则添加渠道条件
                         if (!is_null($channelId)) {
                             $query->where('channel_id', $channelId);
@@ -415,12 +443,39 @@ class RoiController extends Controller
                                 continue;
                             }
                             
-                            // 只有当天数足够时才执行查询计算
-                            $startDate = Carbon::parse($dateStr)->startOfDay();
-                            $endDateForQuery = Carbon::parse($dateStr)->addDays($days - 1)->endOfDay();
+                            // 计算应该使用哪一天的数据来计算ROI
+                            // N日ROI需要使用(注册日期+N)这一天上传的数据
+                            $dataDate = Carbon::parse($dateStr)->addDays($days)->format('Y-m-d');
                             
-                            $query = Transaction::whereBetween('registration_time', [$startDate, $endDateForQuery]);
+                            // 检查是否存在该日期的数据
+                            $hasData = Transaction::where('insert_date', $dataDate)->exists();
                             
+                            // 如果不存在该日期的数据且不是40日后的ROI，则不计算
+                            if (!$hasData && $days < 40) {
+                                // 更新dailyStats中的ROI趋势数据为0
+                                if (isset($dailyStats[$dateStr])) {
+                                    $dailyStats[$dateStr]['roi_trends'][$days] = 0;
+                                }
+                                continue;
+                            }
+                            
+                            // 如果是40日后的ROI，则使用最新一天的数据
+                            if ($days >= 40) {
+                                $latestDate = Transaction::max('insert_date');
+                                if (!$latestDate) {
+                                    // 更新dailyStats中的ROI趋势数据为0
+                                    if (isset($dailyStats[$dateStr])) {
+                                        $dailyStats[$dateStr]['roi_trends'][$days] = 0;
+                                    }
+                                    continue;
+                                }
+                                $dataDate = Carbon::parse($latestDate)->format('Y-m-d');
+                            }
+                            
+                            // 获取该渠道在该起始日期注册的用户在数据日期的充提差额总和
+                            $query = Transaction::where('insert_date', $dataDate)
+                                ->whereDate('registration_time', $dateStr);
+                                
                             // 如果指定了渠道，则添加渠道条件
                             if (!is_null($channelId)) {
                                 $query->where('channel_id', $channelId);
@@ -603,13 +658,87 @@ class RoiController extends Controller
         $channelId = $request->input('channel_id');
         $maxDays = $request->input('max_days', 40);
 
-        // 进行重定向，使用refresh参数触发index方法中的自动计算
-        return redirect()->route('roi.index', [
-            'start_date' => $startDate,
-            'end_date' => $endDate,
-            'channel_id' => $channelId,
-            'refresh' => true
-        ])->with('info', '系统将自动计算ROI数据，这可能需要一些时间。');
+        try {
+            // 清除缓存
+            Cache::forget("dashboard_data_{$startDate}_{$endDate}");
+            
+            // 先做一次详细计算测试，记录日志
+            if ($channelId) {
+                // 测试单日ROI计算
+                $testDate = "2025-03-25";
+                $testChannel = $channelId;
+                
+                // 当日ROI测试
+                $dataDate = Carbon::parse($testDate)->format('Y-m-d');
+                $todayBalance = Transaction::where('insert_date', $dataDate)
+                    ->where('channel_id', $testChannel)
+                    ->whereDate('registration_time', $testDate)
+                    ->sum('balance_difference');
+                    
+                $expense = Expense::getExpenseForDateAndChannel($testDate, $testChannel);
+                $rate = ExchangeRate::getRateForDate($testDate);
+                $todayRoi = ($expense > 0 && $rate > 0) ? (($todayBalance / $rate) / $expense) * 100 : 0;
+                
+                Log::info("ROI计算测试 - 当日: 日期={$testDate}, 渠道={$testChannel}, 充提差额={$todayBalance}, 消耗={$expense}, 汇率={$rate}, ROI={$todayRoi}%");
+                
+                // 次日ROI测试
+                $dataDate = Carbon::parse($testDate)->addDays(1)->format('Y-m-d');
+                $hasData = Transaction::where('insert_date', $dataDate)->exists();
+                $nextDayBalance = Transaction::where('insert_date', $dataDate)
+                    ->where('channel_id', $testChannel)
+                    ->whereDate('registration_time', $testDate)
+                    ->sum('balance_difference');
+                    
+                $nextDayRoi = ($expense > 0 && $rate > 0) ? (($nextDayBalance / $rate) / $expense) * 100 : 0;
+                
+                Log::info("ROI计算测试 - 次日: 日期={$testDate}, 渠道={$testChannel}, 数据日期={$dataDate}, 数据存在={$hasData}, 充提差额={$nextDayBalance}, 消耗={$expense}, 汇率={$rate}, ROI={$nextDayRoi}%");
+            }
+            
+            // 清除指定日期范围和渠道的ROI数据
+            $query = RoiCalculation::whereBetween('date', [$startDate, $endDate]);
+            if ($channelId) {
+                $query->where('channel_id', $channelId);
+            }
+            $deletedCount = $query->delete();
+            
+            // 使用RoiCalculation模型的批量计算方法
+            $dates = [];
+            $current = Carbon::parse($startDate);
+            $end = Carbon::parse($endDate);
+            
+            while ($current->lte($end)) {
+                $dates[] = $current->format('Y-m-d');
+                $current->addDay();
+            }
+            
+            $channelIds = [];
+            if ($channelId) {
+                $channelIds[] = $channelId;
+            } else {
+                $channelIds = Channel::pluck('id')->toArray();
+            }
+            
+            // 批量计算ROI
+            $processedCount = RoiCalculation::batchCalculateRois($dates, $channelIds, $maxDays);
+            
+            // 记录日志
+            Log::info("ROI重新计算: 删除了{$deletedCount}条记录，处理了{$processedCount}条记录。日期范围: {$startDate}至{$endDate}，渠道ID: " . ($channelId ?? '全部'));
+            
+            return redirect()->route('roi.index', [
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'channel_id' => $channelId,
+                'hasFilters' => true
+            ])->with('success', "ROI数据已重新计算，处理了{$processedCount}条记录。");
+        } catch (\Exception $e) {
+            Log::error("ROI重新计算失败: " . $e->getMessage());
+            return redirect()->route('roi.index', [
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'channel_id' => $channelId,
+                'hasFilters' => true
+            ])->with('error', "ROI重新计算失败: " . $e->getMessage());
+        }
     }
 
     /**
@@ -723,48 +852,72 @@ class RoiController extends Controller
      * @param string $date 计算的日期
      * @param int $channelId 渠道ID
      * @param int $dayCount 天数
-     * @param string $startDateForCalc 计算的起始日期
-     * @param float $rateValue 汇率
-     * @param float $expenseValue 消耗
-     * @return array|null 计算结果数组或null
+     * @param string $startDateForCalc 计算汇率和消耗的起始日期
+     * @param float $rateValue 汇率值
+     * @param float $expenseValue 消耗值
+     * @return array 计算结果
      */
     protected function calculateRoiBatch($date, $channelId, $dayCount, $startDateForCalc, $rateValue, $expenseValue)
     {
-        try {
-            // 计算需要查询的日期范围
-            $startDate = Carbon::parse($date)->startOfDay();
-            $endDate = Carbon::parse($date)->addDays($dayCount - 1)->endOfDay();
-            
-            // 构建查询
-            $query = Transaction::whereBetween('registration_time', [$startDate, $endDate]);
-            
-            // 只有在指定了渠道ID时才添加渠道筛选
-            if ($channelId) {
-                $query->where('channel_id', $channelId);
-            }
-            
-            $cumulativeBalance = $query->sum('balance_difference');
-            
-            // 计算ROI百分比
-            $roiPercentage = 0;
-            if ($expenseValue > 0 && $rateValue > 0) {
-                $roiPercentage = (($cumulativeBalance / $rateValue) / $expenseValue) * 100;
-            }
-            
-            // 返回计算结果数组
+        // 确定应该使用哪一天的数据来计算ROI
+        // N日ROI需要使用(注册日期+N)这一天上传的数据
+        $dataDate = Carbon::parse($date)->addDays($dayCount)->format('Y-m-d');
+        
+        // 检查是否存在该日期的数据
+        $hasData = Transaction::where('insert_date', $dataDate)->exists();
+        
+        // 如果不存在该日期的数据且不是40日后的ROI，则不计算
+        if (!$hasData && $dayCount < 40) {
             return [
-                'date' => $date,
-                'channel_id' => $channelId,
+                'has_data' => false,
                 'day_count' => $dayCount,
-                'cumulative_balance' => $cumulativeBalance,
-                'exchange_rate' => $rateValue,
-                'expense' => $expenseValue,
-                'roi_percentage' => $roiPercentage,
+                'channel_id' => $channelId,
+                'date' => $date,
+                'cumulative_balance' => 0,
+                'roi_percentage' => 0,
             ];
-        } catch (\Exception $e) {
-            Log::error("ROI计算失败: {$date}, 渠道: {$channelId}, 天数: {$dayCount}, 错误: " . $e->getMessage());
-            return null;
         }
+        
+        // 如果是40日后的ROI，则使用最新一天的数据
+        if ($dayCount >= 40) {
+            $latestDate = Transaction::max('insert_date');
+            if ($latestDate) {
+                $dataDate = Carbon::parse($latestDate)->format('Y-m-d');
+            } else {
+                return [
+                    'has_data' => false,
+                    'day_count' => $dayCount,
+                    'channel_id' => $channelId,
+                    'date' => $date,
+                    'cumulative_balance' => 0,
+                    'roi_percentage' => 0,
+                ];
+            }
+        }
+        
+        // 获取该渠道在该起始日期注册的用户在数据日期的充提差额总和
+        $cumulativeBalance = Transaction::where('insert_date', $dataDate)
+            ->where('channel_id', $channelId)
+            ->whereDate('registration_time', $date)
+            ->sum('balance_difference');
+        
+        // 计算ROI百分比
+        $roiPercentage = 0;
+        if ($expenseValue > 0 && $rateValue > 0) {
+            $roiPercentage = (($cumulativeBalance / $rateValue) / $expenseValue) * 100;
+        }
+        
+        return [
+            'date' => $date,
+            'channel_id' => $channelId,
+            'day_count' => $dayCount,
+            'cumulative_balance' => $cumulativeBalance,
+            'exchange_rate' => $rateValue,
+            'expense' => $expenseValue,
+            'roi_percentage' => $roiPercentage,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
     }
     
     /**
@@ -790,44 +943,88 @@ class RoiController extends Controller
     }
     
     /**
-     * 单次计算ROI（保留用于单个计算）
+     * 计算特定日期、渠道和天数的ROI
      * 
      * @param string $date 计算的日期
      * @param int $channelId 渠道ID
      * @param int $dayCount 天数
-     * @return void
+     * @return array 计算结果
      */
     protected function calculateRoiForDateChannelDay($date, $channelId, $dayCount)
     {
-        // 获取起始日期和结束日期
-        $dateObj = Carbon::parse($date);
-        $startDateObj = $dateObj->copy()->startOfDay();
-        $endDateObj = $dateObj->copy()->addDays($dayCount - 1)->endOfDay();
+        // 获取起始日期
+        $startDate = Carbon::parse($date)->format('Y-m-d');
         
-        // 获取今天日期
-        $todayDate = Carbon::today()->endOfDay();
+        // 确定应该使用哪一天的数据来计算ROI
+        // N日ROI需要使用(注册日期+N)这一天上传的数据
+        $dataDate = Carbon::parse($date)->addDays($dayCount)->format('Y-m-d');
         
-        // 如果结束日期超过了今天，说明无法完整统计
-        if ($endDateObj > $todayDate) {
-            // 我们完全跳过这个周期的ROI计算，不存储任何值
-            return;
+        // 检查是否存在该日期的数据
+        $hasData = Transaction::where('insert_date', $dataDate)->exists();
+        
+        // 如果不存在该日期的数据且不是40日后的ROI，则不计算
+        if (!$hasData && $dayCount < 40) {
+            return [
+                'has_data' => false,
+                'day_count' => $dayCount,
+                'channel_id' => $channelId,
+                'date' => $date,
+                'cumulative_balance' => 0,
+                'roi_percentage' => 0,
+            ];
         }
         
-        // 获取起始日期的汇率
-        $exchangeRate = ExchangeRate::getRateForDate($date);
+        // 如果是40日后的ROI，则使用最新一天的数据
+        if ($dayCount >= 40) {
+            $latestDate = Transaction::max('insert_date');
+            if ($latestDate) {
+                $dataDate = Carbon::parse($latestDate)->format('Y-m-d');
+            } else {
+                return [
+                    'has_data' => false,
+                    'day_count' => $dayCount,
+                    'channel_id' => $channelId,
+                    'date' => $date,
+                    'cumulative_balance' => 0,
+                    'roi_percentage' => 0,
+                ];
+            }
+        }
         
-        // 获取起始日期的消耗数据
-        $expense = Expense::getExpenseForDateAndChannel($date, $channelId);
+        // 获取汇率
+        $rate = ExchangeRate::where('date', $startDate)->first();
+        $rateValue = $rate ? $rate->rate : null;
         
-        // 获取从起始日期到计算日期的累计充提差额
-        $cumulativeBalance = Transaction::where('channel_id', $channelId)
-            ->whereBetween('registration_time', [$startDateObj, $endDateObj])
+        // 如果没有找到汇率，使用默认汇率
+        if (is_null($rateValue)) {
+            $defaultRate = ExchangeRate::where('is_default', true)->first();
+            $rateValue = $defaultRate ? $defaultRate->rate : 0;
+        }
+        
+        // 获取消耗数据
+        $expense = Expense::where('date', $startDate)
+            ->where('channel_id', $channelId)
+            ->first();
+        $expenseValue = $expense ? $expense->amount : null;
+        
+        // 如果没有找到消耗数据，使用默认消耗
+        if (is_null($expenseValue)) {
+            $defaultExpense = Expense::where('is_default', true)
+                ->where('channel_id', $channelId)
+                ->first();
+            $expenseValue = $defaultExpense ? $defaultExpense->amount : 0;
+        }
+        
+        // 获取起始日期注册的用户在数据日期的充提差额总和
+        $cumulativeBalance = Transaction::where('insert_date', $dataDate)
+            ->where('channel_id', $channelId)
+            ->whereDate('registration_time', $startDate)
             ->sum('balance_difference');
         
         // 计算ROI百分比
         $roiPercentage = 0;
-        if ($expense > 0 && $exchangeRate > 0) {
-            $roiPercentage = (($cumulativeBalance / $exchangeRate) / $expense) * 100;
+        if ($expenseValue > 0 && $rateValue > 0) {
+            $roiPercentage = (($cumulativeBalance / $rateValue) / $expenseValue) * 100;
         }
         
         // 创建或更新ROI计算记录
@@ -839,11 +1036,20 @@ class RoiController extends Controller
             ],
             [
                 'cumulative_balance' => $cumulativeBalance,
-                'exchange_rate' => $exchangeRate,
-                'expense' => $expense,
+                'exchange_rate' => $rateValue,
+                'expense' => $expenseValue,
                 'roi_percentage' => $roiPercentage,
             ]
         );
+        
+        return [
+            'has_data' => true,
+            'day_count' => $dayCount,
+            'channel_id' => $channelId,
+            'date' => $date,
+            'cumulative_balance' => $cumulativeBalance,
+            'roi_percentage' => $roiPercentage,
+        ];
     }
 
     /**

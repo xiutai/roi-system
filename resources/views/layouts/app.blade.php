@@ -170,11 +170,6 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {{ request()->routeIs('roi.*') ? 'active' : '' }}" href="{{ route('roi.index') }}">
-                            <i class="fas fa-chart-pie me-1"></i>ROI分析
-                        </a>
-                    </li>
-                    <li class="nav-item">
                         <a class="nav-link {{ request()->routeIs('import.*') ? 'active' : '' }}" href="{{ route('import.index') }}">
                             <i class="fas fa-file-import me-1"></i>数据导入
                         </a>

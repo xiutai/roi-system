@@ -88,19 +88,11 @@ class ExpenseController extends Controller
             'is_default' => false,
         ]);
 
-        // 检查该日期是否有新增用户
-        $hasNewUsers = DB::table('transactions')
-            ->whereDate('registration_time', $request->input('date'))
-            ->where('channel_id', $request->input('channel_id'))
-            ->exists();
-
-        // 只有在有新增用户且消耗大于0的情况下才触发 ROI 计算
-        if ($hasNewUsers && $request->input('amount') > 0) {
-            \App\Models\RoiCalculation::batchCalculateRois(
-                [$request->input('date')],
-                [$request->input('channel_id')]
-            );
-        }
+        // 触发 ROI 重新计算
+        \App\Models\RoiCalculation::batchCalculateRois(
+            [$request->input('date')],
+            [$request->input('channel_id')]
+        );
         
         return redirect()->route('expenses.index')->with('success', '消耗添加成功。');
     }
@@ -135,19 +127,11 @@ class ExpenseController extends Controller
             'amount' => $request->input('amount'),
         ]);
 
-        // 检查该日期是否有新增用户
-        $hasNewUsers = DB::table('transactions')
-            ->whereDate('registration_time', $expense->date)
-            ->where('channel_id', $expense->channel_id)
-            ->exists();
-
-        // 只有在有新增用户且消耗大于0的情况下才触发 ROI 计算
-        if ($hasNewUsers && $request->input('amount') > 0) {
-            \App\Models\RoiCalculation::batchCalculateRois(
-                [$expense->date->format('Y-m-d')],
-                [$expense->channel_id]
-            );
-        }
+        // 触发 ROI 重新计算
+        \App\Models\RoiCalculation::batchCalculateRois(
+            [$expense->date->format('Y-m-d')],
+            [$expense->channel_id]
+        );
         
         return redirect()->route('expenses.index')->with('success', '消耗更新成功。');
     }
@@ -177,28 +161,25 @@ class ExpenseController extends Controller
             ]
         );
 
-        // 获取所有使用默认消耗且有新增用户的日期
-        $datesWithUsers = DB::table('transactions')
-            ->select(DB::raw('DATE(registration_time) as date'))
-            ->where('channel_id', $request->input('channel_id'))
+        // 获取所有使用默认消耗的日期
+        $dates = \App\Models\DailyStatistic::where('channel_id', $request->input('channel_id'))
             ->whereNotExists(function ($query) use ($request) {
-                $query->select(DB::raw(1))
+                $query->select(\DB::raw(1))
                     ->from('expenses')
-                    ->whereColumn(DB::raw('DATE(transactions.registration_time)'), 'expenses.date')
+                    ->whereColumn('expenses.date', 'daily_statistics.date')
                     ->where('expenses.channel_id', $request->input('channel_id'))
                     ->where('expenses.is_default', false);
             })
-            ->distinct()
             ->pluck('date')
             ->map(function ($date) {
-                return Carbon::parse($date)->format('Y-m-d');
+                return $date->format('Y-m-d');
             })
             ->toArray();
 
-        // 只对有新增用户的日期触发 ROI 计算
-        if (!empty($datesWithUsers) && $request->input('default_amount') > 0) {
+        // 触发 ROI 重新计算
+        if (!empty($dates)) {
             \App\Models\RoiCalculation::batchCalculateRois(
-                $datesWithUsers,
+                $dates,
                 [$request->input('channel_id')]
             );
         }
@@ -227,8 +208,6 @@ class ExpenseController extends Controller
         $amount = $request->input('amount');
         
         $dates = [];
-        $datesWithUsers = [];
-        
         for ($date = clone $startDate; $date->lte($endDate); $date->addDay()) {
             $dateStr = $date->format('Y-m-d');
             $dates[] = $dateStr;
@@ -243,25 +222,13 @@ class ExpenseController extends Controller
                     'is_default' => false,
                 ]
             );
-
-            // 检查该日期是否有新增用户
-            $hasNewUsers = DB::table('transactions')
-                ->whereDate('registration_time', $dateStr)
-                ->where('channel_id', $channelId)
-                ->exists();
-
-            if ($hasNewUsers && $amount > 0) {
-                $datesWithUsers[] = $dateStr;
-            }
         }
 
-        // 只对有新增用户的日期触发 ROI 计算
-        if (!empty($datesWithUsers)) {
-            \App\Models\RoiCalculation::batchCalculateRois(
-                $datesWithUsers,
-                [$channelId]
-            );
-        }
+        // 触发 ROI 重新计算
+        \App\Models\RoiCalculation::batchCalculateRois(
+            $dates,
+            [$channelId]
+        );
         
         return redirect()->route('expenses.index')->with('success', '消耗批量设置成功。');
     }

@@ -15,18 +15,26 @@ use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Imports\TransactionsImport;
-use Illuminate\Support\Facades\Storage;
 
 class ProcessImport implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable;
+    
+    // 注意: 不使用SerializesModels，我们手动指定序列化和反序列化逻辑
 
     /**
-     * 导入作业实例
+     * 导入作业ID
      *
-     * @var \App\Models\ImportJob
+     * @var int
      */
-    protected $importJob;
+    protected $importJobId;
+    
+    /**
+     * 导入作业实例（运行时）
+     *
+     * @var \App\Models\ImportJob|null
+     */
+    protected $importJob = null;
 
     /**
      * 失败前的尝试次数
@@ -57,7 +65,7 @@ class ProcessImport implements ShouldQueue
      */
     public function __construct(ImportJob $importJob)
     {
-        $this->importJob = $importJob;
+        $this->importJobId = $importJob->id;
         // 禁用按内存使用自动重启的队列工作器
         $this->onQueue('imports');
     }
@@ -69,10 +77,14 @@ class ProcessImport implements ShouldQueue
      */
     public function handle()
     {
+        // 从数据库加载导入任务
+        $this->importJob = ImportJob::findOrFail($this->importJobId);
+        
         // 打印日志，便于调试
         Log::info('开始处理导入任务', [
             'job_id' => $this->importJob->id,
-            'filename' => $this->importJob->original_filename
+            'filename' => $this->importJob->original_filename,
+            'insert_date' => $this->importJob->insert_date
         ]);
         
         // 设置最大执行时间（防止脚本超时）
@@ -86,10 +98,23 @@ class ProcessImport implements ShouldQueue
             ]);
             Log::info('已更新任务状态为处理中', ['job_id' => $this->importJob->id]);
             
-            // 获取文件路径
+            // 检查文件名是否存在
+            if (empty($this->importJob->filename)) {
+                throw new \Exception("导入任务缺少文件名");
+            }
+            
+            // 直接使用完整路径，避免使用Storage Facade
             $filePath = storage_path('app/imports/' . $this->importJob->filename);
+            Log::info('处理文件路径', ['path' => $filePath]);
+            
+            // 检查文件是否存在
             if (!file_exists($filePath)) {
                 throw new \Exception("文件不存在: {$filePath}");
+            }
+            
+            // 检查文件是否可读
+            if (!is_readable($filePath)) {
+                throw new \Exception("文件不可读: {$filePath}，请检查权限");
             }
             
             // 获取文件扩展名
@@ -98,6 +123,10 @@ class ProcessImport implements ShouldQueue
             
             // 计算文件大小
             $fileSize = filesize($filePath);
+            if ($fileSize === false) {
+                throw new \Exception("无法获取文件大小: {$filePath}");
+            }
+            
             $fileSizeMB = round($fileSize / 1024 / 1024, 2);
             Log::info('文件大小', ['size_mb' => $fileSizeMB, 'size_bytes' => $fileSize]);
             
@@ -118,7 +147,284 @@ class ProcessImport implements ShouldQueue
             } else {
                 // 使用Excel包处理
                 DB::disableQueryLog(); // 禁用查询日志以减少内存使用
-                Excel::import(new TransactionsImport($this->importJob), $filePath);
+                
+                try {
+                    // 绕过Maatwebsite\Excel的Storage Facade依赖，直接使用文件路径
+                    $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($filePath);
+                    $reader->setReadDataOnly(true);
+                    $spreadsheet = $reader->load($filePath);
+                    
+                    // 获取活动工作表
+                    $worksheet = $spreadsheet->getActiveSheet();
+                    $highestRow = $worksheet->getHighestRow();
+                    
+                    // 获取列标题
+                    $headers = [];
+                    $highestColumn = $worksheet->getHighestColumn();
+                    $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
+                    
+                    for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                        $cell = $worksheet->getCellByColumnAndRow($col, 1);
+                        $headers[$col] = $this->ensureCorrectEncoding($cell->getValue());
+                    }
+                    
+                    // 字段映射（与processCsvFile相同逻辑）
+                    $fieldMap = [
+                        // 原始字段 => 系统字段
+                        'bi_zhong' => 'currency',
+                        'hui_yuan_id' => 'member_id',
+                        'hui_yuan_zhang_hao' => 'member_account',
+                        'zhu_ce_lai_yuan' => 'registration_source',
+                        'zhu_ce_shi_jian' => 'registration_time',
+                        'zong_chong_ti_cha_e' => 'balance_difference',
+                        
+                        // 中文字段映射
+                        '币种' => 'currency',
+                        '会员id' => 'member_id',
+                        '会员ID' => 'member_id',
+                        '会员账号' => 'member_account',
+                        '渠道ID' => 'channel_id_custom', // 保留映射但不使用
+                        '渠道id' => 'channel_id_custom', // 保留映射但不使用
+                        '注册来源' => 'registration_source',
+                        '注册时间' => 'registration_time',
+                        '总充提差额' => 'balance_difference',
+                        
+                        // 英文字段映射
+                        'currency' => 'currency',
+                        'member_id' => 'member_id',
+                        'memberid' => 'member_id',
+                        'member_account' => 'member_account',
+                        'memberaccount' => 'member_account',
+                        'channel_id' => 'channel_id_custom',
+                        'channelid' => 'channel_id_custom',
+                        'registration_source' => 'registration_source',
+                        'registrationsource' => 'registration_source',
+                        'registration_time' => 'registration_time',
+                        'registrationtime' => 'registration_time',
+                        'balance_difference' => 'balance_difference',
+                        'balancedifference' => 'balance_difference',
+                    ];
+                    
+                    // 处理标题编码
+                    $encodedHeaders = [];
+                    foreach ($headers as $index => $header) {
+                        $encodedHeader = $this->ensureCorrectEncoding($header);
+                        $encodedHeaders[$index] = $encodedHeader;
+                    }
+                    
+                    // 映射标题字段
+                    $headerMap = [];
+                    foreach ($encodedHeaders as $index => $header) {
+                        $headerToCheck = trim(strtolower($header));
+                        
+                        if (isset($fieldMap[$headerToCheck])) {
+                            $headerMap[$index] = $fieldMap[$headerToCheck];
+                            continue;
+                        }
+                        
+                        // 尝试模糊匹配
+                        $bestMatch = null;
+                        $bestScore = 0;
+                        foreach ($fieldMap as $key => $value) {
+                            // 精确包含
+                            if (strpos($headerToCheck, $key) !== false) {
+                                $score = strlen($key);
+                                if ($score > $bestScore) {
+                                    $bestScore = $score;
+                                    $bestMatch = $value;
+                                }
+                            }
+                            // 模糊匹配 - 允许一些差异
+                            else if (similar_text($headerToCheck, $key, $percent) && $percent > 70) {
+                                if ($percent > $bestScore) {
+                                    $bestScore = $percent;
+                                    $bestMatch = $value;
+                                }
+                            }
+                        }
+                        
+                        if ($bestMatch !== null) {
+                            $headerMap[$index] = $bestMatch;
+                            Log::info('字段模糊匹配', [
+                                'original' => $headerToCheck,
+                                'matched_to' => $bestMatch,
+                                'score' => $bestScore
+                            ]);
+                        } else {
+                            $headerMap[$index] = $headerToCheck;
+                        }
+                    }
+                    
+                    // 开始处理数据
+                    $insertedRows = 0;
+                    $errorRows = 0;
+                    $errorDetails = [];
+                    
+                    // 预加载所有渠道到内存
+                    $channels = [];
+                    Channel::chunk(500, function ($channelChunk) use (&$channels) {
+                        foreach ($channelChunk as $channel) {
+                            $channels[$channel->name] = $channel->id;
+                        }
+                    });
+                    
+                    // 收集所有记录
+                    $allRecords = [];
+                    
+                    // 从第二行开始处理（跳过标题行）
+                    for ($row = 2; $row <= $highestRow; $row++) {
+                        $mappedRow = [];
+                        
+                        // 获取行数据
+                        for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                            if (isset($headerMap[$col])) {
+                                $cell = $worksheet->getCellByColumnAndRow($col, $row);
+                                $value = $cell->getValue();
+                                // 确保值的编码
+                                $cleanValue = $this->ensureCorrectEncoding($value);
+                                $mappedRow[$headerMap[$col]] = $cleanValue;
+                            }
+                        }
+                        
+                        // 提取必要字段
+                        $memberId = trim($mappedRow['member_id'] ?? '');
+                        $registrationSource = trim($mappedRow['registration_source'] ?? '');
+                        $registrationTime = trim($mappedRow['registration_time'] ?? '');
+                        
+                        // 数值字段验证和转换
+                        $balanceDifference = 0;
+                        $rawBalance = $mappedRow['balance_difference'] ?? '0';
+                        
+                        // 处理可能的数值格式问题
+                        $rawBalance = preg_replace('/[^\d.-]/', '', $rawBalance); // 只保留数字、小数点和负号
+                        
+                        if (is_numeric($rawBalance)) {
+                            $balanceDifference = (float)$rawBalance;
+                        } else {
+                            Log::warning('非数字的充提差额', [
+                                'row' => $row,
+                                'value' => $rawBalance,
+                                'converted' => 0
+                            ]);
+                        }
+                        
+                        // 检查必要字段
+                        if (empty($registrationSource) || empty($registrationTime)) {
+                            $errorRows++;
+                            $errorDetails[] = "行 {$row}: 缺少必要字段 " . 
+                                (empty($registrationSource) ? '注册来源' : '') . 
+                                (empty($registrationSource) && empty($registrationTime) ? '和' : '') . 
+                                (empty($registrationTime) ? '注册时间' : '');
+                            continue;
+                        }
+                        
+                        // 获取或创建渠道
+                        if (!isset($channels[$registrationSource])) {
+                            // 创建新渠道
+                            $channel = Channel::firstOrCreate(
+                                ['name' => $registrationSource],
+                                ['description' => '从导入数据自动创建']
+                            );
+                            $channels[$registrationSource] = $channel->id;
+                        }
+                        
+                        $channelId = $channels[$registrationSource];
+                        
+                        // 收集所有记录
+                        $allRecords[] = [
+                            'currency' => $mappedRow['currency'] ?? 'PKR',
+                            'member_id' => $memberId,
+                            'member_account' => $mappedRow['member_account'] ?? '',
+                            'channel_id' => $channelId,
+                            'registration_source' => $registrationSource,
+                            'registration_time' => $this->transformDate($registrationTime),
+                            'balance_difference' => $balanceDifference,
+                            'insert_date' => $this->importJob->insert_date,
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ];
+                    }
+                    
+                    // 如果需要替换现有数据（相同insert_date的数据）
+                    $replacedRows = 0;
+                    if ($this->importJob->is_replacing_existing) {
+                        Log::info('删除相同插入日期的数据', ['insert_date' => $this->importJob->insert_date]);
+                        $replacedRows = DB::table('transactions')
+                            ->where('insert_date', $this->importJob->insert_date)
+                            ->delete();
+                        Log::info('删除完成', ['replaced_rows' => $replacedRows]);
+                        
+                        // 更新导入任务的替换记录数
+                        $this->importJob->update([
+                            'replaced_rows' => $replacedRows
+                        ]);
+                    }
+                    
+                    // 批量插入数据
+                    if (!empty($allRecords)) {
+                        Log::info('开始插入Excel数据', ['count' => count($allRecords)]);
+                        
+                        // 使用更小的批次插入记录，每批次单独使用事务
+                        $batchSize = 3000;
+                        $batches = array_chunk($allRecords, $batchSize);
+                        $batchInserted = 0;
+                        
+                        foreach ($batches as $index => $batch) {
+                            try {
+                                DB::beginTransaction();
+                                
+                                DB::table('transactions')->insert($batch);
+                                $batchInserted += count($batch);
+                                
+                                DB::commit();
+                                
+                                // 每批次更新一次插入计数
+                                $this->importJob->update([
+                                    'inserted_rows' => $batchInserted
+                                ]);
+                                
+                                Log::info('批次插入完成', [
+                                    'batch' => $index + 1, 
+                                    'total_batches' => count($batches),
+                                    'inserted_so_far' => $batchInserted
+                                ]);
+                                
+                            } catch (\Exception $e) {
+                                if (DB::transactionLevel() > 0) {
+                                    DB::rollBack();
+                                }
+                                Log::error('批次插入失败', [
+                                    'batch' => $index + 1,
+                                    'error' => $e->getMessage()
+                                ]);
+                                // 继续处理下一批次，不中断整个流程
+                            }
+                        }
+                        
+                        $insertedRows = $batchInserted;
+                        Log::info('Excel数据插入完成', ['total_inserted' => $insertedRows]);
+                    }
+                    
+                    // 更新最终进度
+                    $this->importJob->update([
+                        'processed_rows' => $highestRow - 1, // 减去标题行
+                        'inserted_rows' => $insertedRows,
+                        'error_rows' => $errorRows,
+                        'replaced_rows' => $replacedRows
+                    ]);
+                    
+                    // 释放内存
+                    unset($allRecords);
+                    unset($spreadsheet);
+                    gc_collect_cycles();
+                    
+                } catch (\Exception $e) {
+                    Log::error('Excel导入异常', [
+                        'error' => $e->getMessage(),
+                        'file' => $filePath
+                    ]);
+                    throw new \Exception("Excel导入失败: " . $e->getMessage());
+                }
             }
             
             // 更新任务状态为已完成
@@ -131,7 +437,7 @@ class ProcessImport implements ShouldQueue
                 'job_id' => $this->importJob->id,
                 'processed' => $this->importJob->processed_rows,
                 'inserted' => $this->importJob->inserted_rows,
-                'updated' => $this->importJob->updated_rows,
+                'replaced' => $this->importJob->replaced_rows,
                 'duration_minutes' => $this->importJob->started_at->diffInMinutes($this->importJob->completed_at)
             ]);
             
@@ -325,25 +631,63 @@ class ProcessImport implements ShouldQueue
                 '注册来源' => 'registration_source',
                 '注册时间' => 'registration_time',
                 '总充提差额' => 'balance_difference',
+                
+                // 英文字段映射
+                'currency' => 'currency',
+                'member_id' => 'member_id',
+                'memberid' => 'member_id',
+                'member_account' => 'member_account',
+                'memberaccount' => 'member_account',
+                'channel_id' => 'channel_id_custom',
+                'channelid' => 'channel_id_custom',
+                'registration_source' => 'registration_source',
+                'registrationsource' => 'registration_source',
+                'registration_time' => 'registration_time',
+                'registrationtime' => 'registration_time',
+                'balance_difference' => 'balance_difference',
+                'balancedifference' => 'balance_difference',
             ];
             
             // 映射标题字段
             $headerMap = [];
             foreach ($encodedHeaders as $index => $header) {
-                $header = trim(strtolower($header)); // 转小写以增加匹配成功率
-                if (isset($fieldMap[$header])) {
-                    $headerMap[$index] = $fieldMap[$header];
-                } else {
+                $headerToCheck = trim(strtolower($this->ensureCorrectEncoding($header))); // 先确保编码正确并处理特殊格式
+                
+                if (isset($fieldMap[$headerToCheck])) {
+                    $headerMap[$index] = $fieldMap[$headerToCheck];
+                    continue;
+                }
+                
                     // 尝试模糊匹配
+                $bestMatch = null;
+                $bestScore = 0;
                     foreach ($fieldMap as $key => $value) {
-                        if (strpos($header, $key) !== false) {
-                            $headerMap[$index] = $value;
-                            break;
+                    // 精确包含
+                    if (strpos($headerToCheck, $key) !== false) {
+                        $score = strlen($key);
+                        if ($score > $bestScore) {
+                            $bestScore = $score;
+                            $bestMatch = $value;
                         }
                     }
-                    if (!isset($headerMap[$index])) {
-                        $headerMap[$index] = $header;
+                    // 模糊匹配 - 允许一些差异
+                    else if (similar_text($headerToCheck, $key, $percent) && $percent > 70) {
+                        if ($percent > $bestScore) {
+                            $bestScore = $percent;
+                            $bestMatch = $value;
+                        }
                     }
+                }
+                
+                if ($bestMatch !== null) {
+                    $headerMap[$index] = $bestMatch;
+                    Log::info('字段模糊匹配', [
+                        'original' => $headerToCheck,
+                        'matched_to' => $bestMatch,
+                        'score' => $bestScore
+                    ]);
+                } else {
+                    $headerMap[$index] = $headerToCheck;
                 }
             }
             
@@ -427,7 +771,9 @@ class ProcessImport implements ShouldQueue
                     $mappedRow = [];
                     foreach ($row as $index => $value) {
                         if (isset($headerMap[$index])) {
-                            $mappedRow[$headerMap[$index]] = $this->ensureCorrectEncoding($value);
+                            // 先确保值的编码和特殊格式处理
+                            $cleanValue = $this->ensureCorrectEncoding($value);
+                            $mappedRow[$headerMap[$index]] = $cleanValue;
                         }
                     }
                     
@@ -435,9 +781,23 @@ class ProcessImport implements ShouldQueue
                     $memberId = trim($mappedRow['member_id'] ?? '');
                     $registrationSource = trim($mappedRow['registration_source'] ?? '');
                     $registrationTime = trim($mappedRow['registration_time'] ?? '');
-                    $balanceDifference = isset($mappedRow['balance_difference']) && is_numeric($mappedRow['balance_difference']) 
-                        ? (float)$mappedRow['balance_difference'] 
-                        : 0;
+                    
+                    // 数值字段验证和转换
+                    $balanceDifference = 0;
+                    $rawBalance = $mappedRow['balance_difference'] ?? '0';
+                    
+                    // 处理可能的数值格式问题
+                    $rawBalance = preg_replace('/[^\d.-]/', '', $rawBalance); // 只保留数字、小数点和负号
+                    
+                    if (is_numeric($rawBalance)) {
+                        $balanceDifference = (float)$rawBalance;
+                    } else {
+                        Log::warning('非数字的充提差额', [
+                            'row' => $processedRows,
+                            'value' => $rawBalance,
+                            'converted' => 0
+                        ]);
+                    }
                     
                     // 检查必要字段
                     if (empty($registrationSource) || empty($registrationTime)) {
@@ -479,6 +839,7 @@ class ProcessImport implements ShouldQueue
                         'registration_source' => $registrationSource,
                         'registration_time' => $this->transformDate($registrationTime),
                         'balance_difference' => $balanceDifference,
+                        'insert_date' => $this->importJob->insert_date,
                         'created_at' => now(),
                         'updated_at' => now(),
                     ];
@@ -554,22 +915,28 @@ class ProcessImport implements ShouldQueue
             // 第三步：一次性批量操作
             Log::info('开始数据库批量操作');
             
-            // 3.1 找出需要新增的记录（会员ID不存在的记录）
-            $recordsToInsert = [];
-            foreach ($allRecords as $record) {
-                $memberId = $record['member_id'];
-                if (empty($memberId) || !isset($existingMemberIds[$memberId])) {
-                    $recordsToInsert[] = $record;
-                }
+            // 如果需要替换现有数据（相同insert_date的数据）
+            $replacedRows = 0;
+            if ($this->importJob->is_replacing_existing) {
+                Log::info('删除相同插入日期的数据', ['insert_date' => $this->importJob->insert_date]);
+                $replacedRows = DB::table('transactions')
+                    ->where('insert_date', $this->importJob->insert_date)
+                    ->delete();
+                Log::info('删除完成', ['replaced_rows' => $replacedRows]);
+                
+                // 更新导入任务的替换记录数
+                $this->importJob->update([
+                    'replaced_rows' => $replacedRows
+                ]);
             }
             
-            // 3.2 一次性插入所有新记录
-            if (!empty($recordsToInsert)) {
-                Log::info('开始插入新记录', ['count' => count($recordsToInsert)]);
+            // 直接插入所有记录
+            if (!empty($allRecords)) {
+                Log::info('开始插入新记录', ['count' => count($allRecords)]);
                 
                 // 使用更小的批次插入记录，每批次单独使用事务
                 $batchSize = 3000; // 从10000改为3000，减小批次大小以避免插入失败
-                $batches = array_chunk($recordsToInsert, $batchSize);
+                $batches = array_chunk($allRecords, $batchSize);
                 $batchInserted = 0;
                 
                 foreach ($batches as $index => $batch) {
@@ -608,68 +975,20 @@ class ProcessImport implements ShouldQueue
                 Log::info('新记录插入完成', ['total_inserted' => $insertedRows]);
             }
             
-            // 3.3 一次性更新现有记录
-            if (!empty($existingMemberIds)) {
-                Log::info('开始更新现有记录', ['count' => count($existingMemberIds)]);
-                
-                // 分批处理更新，每批次单独使用事务
-                $memberIdsToUpdate = array_keys(array_intersect_key($memberBalances, $existingMemberIds));
-                $memberIdBatches = array_chunk($memberIdsToUpdate, 1000); // 从500改为1000
-                $totalUpdated = 0;
-                
-                foreach ($memberIdBatches as $index => $memberIdBatch) {
-                    try {
-                        DB::beginTransaction();
-                        $batchUpdated = 0;
-                        
-                        foreach ($memberIdBatch as $memberId) {
-                            // 使用原生SQL进行更新，提高效率
-                            $updated = DB::update(
-                                'UPDATE transactions SET 
-                                    balance_difference = balance_difference + ?, 
-                                    updated_at = ? 
-                                WHERE member_id = ?',
-                                [$memberBalances[$memberId], now(), $memberId]
-                            );
-                            $batchUpdated += $updated;
-                        }
-                        
-                        DB::commit();
-                        $totalUpdated += $batchUpdated;
-                        
-                        // 每批次更新一次更新计数
-                        $this->importJob->update([
-                            'updated_rows' => $totalUpdated
-                        ]);
-                        
-                    } catch (\Exception $e) {
-                        if (DB::transactionLevel() > 0) {
-                            DB::rollBack();
-                        }
-                        Log::error('批次更新失败', [
-                            'batch' => $index + 1,
-                            'error' => $e->getMessage()
-                        ]);
-                        // 继续处理下一批次，不中断整个流程
-                    }
-                }
-                
-                $updatedRows = $totalUpdated;
-                Log::info('更新操作完成', ['total_updated' => $updatedRows]);
-            }
-            
             // 更新最终进度
             $this->importJob->update([
                 'processed_rows' => $processedRows,
                 'inserted_rows' => $insertedRows ?? 0,
-                'updated_rows' => $updatedRows ?? 0,
-                'error_rows' => $errorRows
+                'updated_rows' => 0, // 不再更新现有记录
+                'error_rows' => $errorRows,
+                'replaced_rows' => $replacedRows
             ]);
             
             Log::info('数据导入完成', [
                 'inserted' => $insertedRows ?? 0,
-                'updated' => $updatedRows ?? 0,
-                'errors' => $errorRows
+                'updated' => 0,
+                'errors' => $errorRows,
+                'replaced' => $replacedRows
             ]);
             
             // 释放内存
@@ -725,8 +1044,13 @@ class ProcessImport implements ShouldQueue
         // 处理Excel导出的特殊格式 ="xxx"
         if (preg_match('/^="(.*)"$/', $str, $matches)) {
             $str = $matches[1];
-            // 对于处理过的字符串记录日志（仅在调试需要时启用）
+            // 记录处理过的字符串(调试需要时)
             // Log::debug('处理Excel特殊格式', ['original' => $str, 'processed' => $matches[1]]);
+        }
+        
+        // 处理可能的双重引号
+        if (strpos($str, '""') !== false) {
+            $str = str_replace('""', '"', $str);
         }
         
         // 尝试转换编码
@@ -761,6 +1085,18 @@ class ProcessImport implements ShouldQueue
         // 处理Excel导出的特殊格式 ="xxx"
         if (preg_match('/^="(.*)"$/', $value, $matches)) {
             $value = $matches[1];
+        }
+        
+        // 如果是美式日期格式 (MM/DD/YYYY)，转为 YYYY-MM-DD
+        if (preg_match('/^(\d{1,2})\/(\d{1,2})\/(\d{4})(.*)$/', $value, $matches)) {
+            $value = $matches[3] . '-' . str_pad($matches[1], 2, '0', STR_PAD_LEFT) . '-' . 
+                     str_pad($matches[2], 2, '0', STR_PAD_LEFT) . $matches[4];
+        }
+        
+        // 如果是中文日期格式 (YYYY/MM/DD)，转为 YYYY-MM-DD
+        if (preg_match('/^(\d{4})\/(\d{1,2})\/(\d{1,2})(.*)$/', $value, $matches)) {
+            $value = $matches[1] . '-' . str_pad($matches[2], 2, '0', STR_PAD_LEFT) . '-' . 
+                     str_pad($matches[3], 2, '0', STR_PAD_LEFT) . $matches[4];
         }
         
         try {

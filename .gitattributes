@@ -1,28 +1,35 @@
-* text=auto eol=lf
-*.php text eol=lf
-*.js text eol=lf
-*.jsx text eol=lf
-*.json text eol=lf
-*.css text eol=lf
-*.scss text eol=lf
-*.sass text eol=lf
+* text=auto
+
+# 指定特定文件类型的行尾
 *.blade.php text eol=lf
+*.php text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.html text eol=lf
 *.md text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+
+# 排除二进制文件
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.xlsx binary
+
+*.jsx text eol=lf
+*.scss text eol=lf
+*.sass text eol=lf
 *.xml text eol=lf
 *.svg text eol=lf
 *.txt text eol=lf
 .env* text eol=lf
 .htaccess text eol=lf
 composer.* text eol=lf
-
-# 二进制文件
-*.png binary
-*.jpg binary
-*.gif binary
-*.ico binary
-*.pdf binary
 
 *.blade.php diff=html
 *.css diff=css
