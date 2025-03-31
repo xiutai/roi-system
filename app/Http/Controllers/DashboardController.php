@@ -201,9 +201,6 @@ class DashboardController extends Controller
                 $roiQuery->where('channel_id', $channelId);
             }
             
-            // 调试输出
-            Log::info("ROI查询条件: 日期范围={$startDateStr}至{$endDateStr}, 渠道ID=" . ($channelId ?: '全部'));
-            
             $roiData = $roiQuery->get()
                 ->groupBy(function($item) {
                     // 确保日期格式一致，统一使用Y-m-d格式
@@ -229,9 +226,6 @@ class DashboardController extends Controller
                         });
                 });
             
-            // 调试输出ROI数据结构
-            Log::info("ROI数据计算结果: " . json_encode($roiData));
-            
             foreach ($dates as $dateStr) {
                 // 获取当天的基础统计数据
                 $stats = $statsByDate[$dateStr] ?? null;
@@ -241,9 +235,6 @@ class DashboardController extends Controller
                 
                 // 获取ROI数据
                 $roiDataForDate = $roiData[$dateStr] ?? collect();
-                
-                // 调试输出当前日期的ROI数据
-                Log::info("日期: {$dateStr} 的ROI数据: " . json_encode($roiDataForDate));
                 
                 // 只有当有注册数据或消耗数据或roi数据时才添加此日期
                 $hasData = false;
@@ -283,9 +274,6 @@ class DashboardController extends Controller
                 // 获取当日ROI (day_count = 1) - 直接使用数据库中的ROI值
                 $dayRoi = isset($roiDataForDate[1]) ? $roiDataForDate[1]['roi_percentage'] : 0;
                 $dailyBalance = isset($roiDataForDate[1]) ? $roiDataForDate[1]['cumulative_balance'] : 0;
-                
-                // 调试输出当日ROI
-                Log::info("日期: {$dateStr} 的当日ROI值: {$dayRoi}");
                 
                 // 计算付费率
                 $conversionRate = $registrationCount > 0 ? ($payingUsers / $registrationCount) * 100 : 0;
@@ -525,9 +513,6 @@ class DashboardController extends Controller
             
             // 批量计算ROI
             $processedCount = RoiCalculation::batchCalculateRois($dates, $channelIds, 40);
-            
-            // 记录日志
-            Log::info("仪表盘ROI重新计算: 处理了{$processedCount}条记录。日期范围: {$startDateStr}至{$endDateStr}, 渠道: " . ($channelId ?: '全部'));
             
             // 构建重定向URL，保留筛选参数
             $redirectUrl = route('dashboard', [

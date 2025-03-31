@@ -65,9 +65,6 @@
                     <a href="{{ route('import.index') }}" class="btn btn-primary">
                         <i class="fas fa-file-import me-2"></i>导入数据
                     </a>
-                    <a href="{{ route('roi.index') }}" class="btn btn-success">
-                        <i class="fas fa-chart-pie me-2"></i>查看ROI
-                    </a>
                     <a href="{{ route('exchange_rates.index') }}" class="btn btn-info text-white">
                         <i class="fas fa-exchange-alt me-2"></i>管理汇率
                     </a>
@@ -84,37 +81,11 @@
 <div class="card mb-4">
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="card-title mb-0">
-                <i class="fas fa-chart-line me-2"></i>ROI趋势图 
-                @if(isset($selectedChannelName))
-                    <span class="badge bg-primary">{{ $selectedChannelName }}</span>
-                @endif
-                @if(isset($startDateStr) && isset($endDateStr))
-                    <span class="badge bg-info text-white">{{ $startDateStr }} 至 {{ $endDateStr }}</span>
-                @endif
+            <h5 class="card-title">
+                <i class="fas fa-chart-line me-2"></i>ROI趋势图
             </h5>
-            <div>
-                @if($hasFilters ?? false)
-                    <a href="{{ route('dashboard') }}" class="btn btn-sm btn-outline-secondary me-2">
-                        <i class="fas fa-times me-1"></i> 清除筛选
-                    </a>
-                @endif
-                <form action="{{ route('dashboard.refresh') }}" method="POST" style="display: inline;">
-                    @csrf
-                    @if(isset($channelId))
-                        <input type="hidden" name="channel_id" value="{{ $channelId }}">
-                    @endif
-                    @if(isset($startDateStr) && isset($endDateStr))
-                        <input type="hidden" name="daterange" value="{{ $startDateStr }} - {{ $endDateStr }}">
-                    @endif
-                    <input type="hidden" name="hasFilters" value="{{ $hasFilters ?? '' }}">
-                    <button type="submit" class="btn btn-sm btn-primary">
-                        <i class="fas fa-sync-alt me-1"></i> 刷新数据
-                    </button>
-                </form>
-            </div>
         </div>
-        <div class="chart-container">
+        <div style="height: 350px;">
             <canvas id="roiChart"></canvas>
         </div>
     </div>
@@ -125,30 +96,12 @@
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h5 class="card-title">
-                <i class="fas fa-table me-2"></i>ROI数据
-                @if(isset($selectedChannelName))
-                    <span class="badge bg-primary">{{ $selectedChannelName }}</span>
-                @endif
+                <i class="fas fa-table me-2"></i>ROI数据表格
             </h5>
             <div>
-                @if($hasFilters ?? false)
-                    <a href="{{ route('dashboard') }}" class="btn btn-sm btn-outline-secondary me-2">
-                        <i class="fas fa-times me-1"></i> 清除筛选
-                    </a>
-                @endif
-                <form action="{{ route('dashboard.refresh') }}" method="POST" style="display: inline;">
-                    @csrf
-                    @if(isset($channelId))
-                        <input type="hidden" name="channel_id" value="{{ $channelId }}">
-                    @endif
-                    @if(isset($startDateStr) && isset($endDateStr))
-                        <input type="hidden" name="daterange" value="{{ $startDateStr }} - {{ $endDateStr }}">
-                    @endif
-                    <input type="hidden" name="hasFilters" value="{{ $hasFilters ?? '' }}">
-                    <button type="submit" class="btn btn-sm btn-primary">
-                        <i class="fas fa-sync-alt me-1"></i> 刷新数据
-                    </button>
-                </form>
+                <a href="{{ route('dashboard') }}" class="btn btn-outline-secondary btn-sm">
+                    <i class="fas fa-filter-circle-xmark me-1"></i>清除筛选
+                </a>
             </div>
         </div>
         
@@ -184,7 +137,7 @@
         @if(!isset($channelId))
         <div class="alert alert-info bg-light-info border-0 mb-4">
             <i class="fas fa-info-circle me-2 text-info"></i>
-            查看单个渠道的详细数据，请前往 <a href="{{ route('roi.index') }}" class="alert-link text-info">ROI分析</a> 页面进行筛选或使用上方筛选功能。
+            可以使用上方筛选功能查看特定渠道的详细数据。
         </div>
         @endif
         
@@ -355,17 +308,46 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
 <script type="text/javascript">
     document.addEventListener('DOMContentLoaded', function() {
+        // 初始化日期选择器
+        $('#daterangepicker').daterangepicker({
+            locale: {
+                format: 'YYYY-MM-DD',
+                separator: ' - ',
+                applyLabel: '确定',
+                cancelLabel: '取消',
+                fromLabel: '从',
+                toLabel: '到',
+                customRangeLabel: '自定义',
+                weekLabel: 'W',
+                daysOfWeek: ['日', '一', '二', '三', '四', '五', '六'],
+                monthNames: ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'],
+                firstDay: 1
+            },
+            autoUpdateInput: false,
+            ranges: {
+                '最近7天': [moment().subtract(6, 'days'), moment()],
+                '最近30天': [moment().subtract(29, 'days'), moment()],
+                '本月': [moment().startOf('month'), moment().endOf('month')],
+                '上月': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
+            }
+        });
+        
+        // 当选择日期时更新输入框
+        $('#daterangepicker').on('apply.daterangepicker', function(ev, picker) {
+            $(this).val(picker.startDate.format('YYYY-MM-DD') + ' - ' + picker.endDate.format('YYYY-MM-DD'));
+        });
+        
+        $('#daterangepicker').on('cancel.daterangepicker', function(ev, picker) {
+            $(this).val('');
+        });
+
         // 检查Chart.js库是否正确加载
         if (typeof Chart === 'undefined') {
-            console.error('Chart.js库未加载，请检查相关依赖！');
             return;
         }
         
         // 获取日期数据
         const dates = JSON.parse('{!! json_encode($actualDisplayDates ?? []) !!}');
-        
-        // 调试日期数据
-        console.log('Chart dates:', dates);
         
         // 格式化日期为更短的形式 (MM-DD)
         const formattedDates = dates.map(date => {
@@ -376,15 +358,9 @@
         // 获取图表数据并反转顺序，使其与日期对应
         const chartSeries = JSON.parse('{!! json_encode($chartSeries) !!}');
         
-        // 调试图表数据
-        console.log('Chart series before:', chartSeries);
-        
         chartSeries.forEach(series => {
             series.data = series.data.slice();
         });
-        
-        // 调试处理后的图表数据
-        console.log('Chart series after:', chartSeries);
         
         // 设置颜色 - 参考图1的配色方案
         const colors = [
@@ -416,12 +392,8 @@
         const ctx = document.getElementById('roiChart');
         
         if (!ctx) {
-            console.error('无法找到图表容器元素 #roiChart');
             return;
         }
-        
-        // 确保DOM元素正确获取
-        console.log('Chart container:', ctx);
         
         // 清除可能的旧图表实例
         if (window.roiChartInstance) {

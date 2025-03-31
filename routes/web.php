@@ -76,9 +76,17 @@ Route::middleware(['auth'])->group(function () {
     Route::resource('channels', ChannelController::class);
 
     // ROI管理
-    Route::get('/roi', [RoiController::class, 'index'])->name('roi.index');
-    Route::post('/roi/recalculate', [RoiController::class, 'recalculate'])->name('roi.recalculate');
-    Route::get('/roi/{date}/{channel}', [RoiController::class, 'show'])->name('roi.show');
+    Route::get('/roi', function() {
+        abort(404);
+    })->name('roi.index');
+    
+    Route::post('/roi/recalculate', function() {
+        abort(404);
+    })->name('roi.recalculate');
+    
+    Route::get('/roi/{date}/{channel}', function() {
+        abort(404);
+    })->name('roi.show');
     
     // 用户管理（仅管理员可用）
     Route::middleware(['admin'])->group(function () {
