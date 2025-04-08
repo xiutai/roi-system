@@ -398,6 +398,9 @@ class DashboardController extends Controller
             // 使用最新日期的数据作为汇总趋势数据的基准
             $latestDate = end($actualDisplayDates);
             if ($latestDate && isset($dailyStats[$latestDate])) {
+                // 获取当日ROI
+                $summaryData['daily_roi'] = $dailyStats[$latestDate]['daily_roi'];
+                
                 // 获取2,3,5,7,14,30日ROI
                 foreach ([2, 3, 5, 7, 14, 30] as $day) {
                     $summaryData['roi_trends'][$day] = $dailyStats[$latestDate]['roi_trends'][$day];
