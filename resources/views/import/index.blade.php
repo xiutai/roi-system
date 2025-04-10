@@ -346,7 +346,7 @@
                 });
                 
                 // 发送请求
-                xhr.open('POST', '{{ route("import.async") }}', true);
+                xhr.open('POST', '/import/async', true);
                 xhr.send(formData);
                 
                 // 处理错误函数
