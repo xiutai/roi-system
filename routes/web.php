@@ -45,6 +45,7 @@ Route::middleware(['auth'])->group(function () {
     // Excel导入
     Route::get('/import', [ImportController::class, 'index'])->name('import.index');
     Route::post('/import', [ImportController::class, 'store'])->name('import.store');
+    Route::post('/import/async', [ImportController::class, 'uploadAsync'])->name('import.async');
     Route::post('/import/clear', [ImportController::class, 'clearData'])->name('import.clear');
     Route::get('/import/{id}', [ImportController::class, 'show'])->name('import.show');
     Route::get('/import/{id}/progress', [ImportController::class, 'progress'])->name('import.progress');

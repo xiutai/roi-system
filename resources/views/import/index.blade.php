@@ -6,7 +6,7 @@
 
 @section('content')
 <div class="alert alert-info">
-    <i class="bi bi-info-circle"></i> 通过上传Excel或CSV文件导入交易数据。系统将自动创建不存在的渠道。
+    <i class="bi bi-info-circle"></i> 通过上传CSV文件导入交易数据。系统将自动创建不存在的渠道。
 </div>
 
 <div class="row mb-4">
@@ -16,11 +16,11 @@
                 <h5 class="card-title">上传交易数据</h5>
             </div>
             <div class="card-body">
-                <form action="{{ route('import.store') }}" method="POST" enctype="multipart/form-data">
+                <form id="import-form" action="{{ route('import.store') }}" method="POST" enctype="multipart/form-data">
                     @csrf
                     <div class="mb-3">
-                        <label for="excel_file" class="form-label">选择Excel/CSV文件 <span class="text-danger">*</span></label>
-                        <input type="file" class="form-control @error('excel_file') is-invalid @enderror" id="excel_file" name="excel_file" accept=".xlsx,.xls,.csv">
+                        <label for="excel_file" class="form-label">选择CSV文件 <span class="text-danger">*</span></label>
+                        <input type="file" class="form-control @error('excel_file') is-invalid @enderror" id="excel_file" name="excel_file" accept=".csv">
                         @error('excel_file')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
@@ -33,7 +33,21 @@
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
                     </div>
-                    <button type="submit" class="btn btn-primary">
+                    
+                    <div id="upload-progress-container" class="mb-3 d-none">
+                        <label class="form-label">上传进度</label>
+                        <div class="progress">
+                            <div id="upload-progress-bar" class="progress-bar" 
+                                 role="progressbar" 
+                                 style="width: 0%"
+                                 aria-valuenow="0" 
+                                 aria-valuemin="0" 
+                                 aria-valuemax="100">0%</div>
+                        </div>
+                        <div id="upload-status" class="form-text mt-1"></div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary" id="import-btn">
                         <i class="bi bi-upload"></i> 导入数据
                     </button>
                     <a href="{{ asset('templates/transaction_template.csv') }}" class="btn btn-outline-secondary">
@@ -109,10 +123,11 @@
                                         @php
                                         $progressBarClass = $job->status == 'failed' ? 'progress-bar bg-danger' : 'progress-bar';
                                         $progressWidth = $job->progress_percentage;
+                                        $styleAttr = "width: " . $progressWidth . "%;";
                                         @endphp
                                         <div class="{{ $progressBarClass }}" 
                                              role="progressbar" 
-                                             style="width: {{ $progressWidth }}%"
+                                             style="{{ $styleAttr }}"
                                              aria-valuenow="{{ $progressWidth }}" 
                                              aria-valuemin="0" 
                                              aria-valuemax="100">
@@ -141,13 +156,25 @@
         <h5 class="card-title">导入说明</h5>
     </div>
     <div class="card-body">
-        <h6>CSV/Excel文件格式要求：</h6>
+        <h6>CSV文件格式要求：</h6>
         <ul>
+            <li>只支持CSV格式文件，不支持Excel格式</li>
             <li>文件必须包含标题行</li>
-            <li>支持的字段：币种、会员ID、会员账号、渠道ID（可选）、注册来源（必填，用作渠道名称）、注册时间、总充提差额</li>
-            <li>注册时间格式：YYYY-MM-DD HH:MM:SS</li>
+            <li>必填字段：注册来源(registration_source)、注册时间(registration_time)</li>
+            <li>其他支持的字段：币种(currency)、会员ID(member_id)、会员账号(member_account)、总充提差额(balance_difference)</li>
+            <li>注册时间格式：YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS</li>
             <li>字段名称不区分大小写，可以使用中文或英文字段名</li>
             <li>如果数据量较大，导入可能需要几分钟时间</li>
+        </ul>
+        
+        <h6>支持的字段名称示例：</h6>
+        <ul>
+            <li>注册来源：zhu_ce_lai_yuan, 注册来源, registration_source, source, channel等</li>
+            <li>注册时间：zhu_ce_shi_jian, 注册时间, registration_time, time, date等</li>
+            <li>币种：bi_zhong, 币种, currency, cur等</li>
+            <li>会员ID：hui_yuan_id, 会员id, member_id, mid等</li>
+            <li>会员账号：hui_yuan_zhang_hao, 会员账号, member_account, account等</li>
+            <li>总充提差额：zong_chong_ti_cha_e, 总充提差额, balance_difference, balance等</li>
         </ul>
         
         <h6>导入后的操作：</h6>
@@ -231,6 +258,112 @@
         };
         
         refreshProgress();
+        
+        // 异步上传功能
+        const importForm = document.getElementById('import-form');
+        const importBtn = document.getElementById('import-btn');
+        const fileInput = document.getElementById('excel_file');
+        const dateInput = document.getElementById('insert_date');
+        const progressContainer = document.getElementById('upload-progress-container');
+        const progressBar = document.getElementById('upload-progress-bar');
+        const statusText = document.getElementById('upload-status');
+        
+        if (importForm) {
+            importForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                // 验证文件已选择
+                if (!fileInput.files.length) {
+                    alert('请选择要上传的文件');
+                    return;
+                }
+                
+                // 准备FormData对象
+                const formData = new FormData();
+                formData.append('excel_file', fileInput.files[0]);
+                if (dateInput.value) {
+                    formData.append('insert_date', dateInput.value);
+                }
+                formData.append('_token', '{{ csrf_token() }}');
+                
+                // 设置上传按钮为禁用状态
+                importBtn.disabled = true;
+                importBtn.innerHTML = '<i class="bi bi-hourglass"></i> 上传中...';
+                
+                // 显示进度条
+                progressContainer.classList.remove('d-none');
+                progressBar.style.width = '0%';
+                progressBar.textContent = '0%';
+                statusText.textContent = '准备上传...';
+                
+                // 创建XHR请求
+                const xhr = new XMLHttpRequest();
+                
+                // 上传进度事件
+                xhr.upload.addEventListener('progress', function(e) {
+                    if (e.lengthComputable) {
+                        const percentComplete = Math.round((e.loaded / e.total) * 100);
+                        progressBar.style.width = percentComplete + '%';
+                        progressBar.textContent = percentComplete + '%';
+                        statusText.textContent = '正在上传文件...';
+                    }
+                });
+                
+                // 上传完成事件
+                xhr.addEventListener('load', function() {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            if (response.success) {
+                                progressBar.style.width = '100%';
+                                progressBar.textContent = '100%';
+                                statusText.textContent = '上传成功！文件已在后台处理中，页面将在3秒后刷新...';
+                                statusText.classList.add('text-success');
+                                
+                                // 3秒后刷新页面
+                                setTimeout(function() {
+                                    window.location.reload();
+                                }, 3000);
+                            } else {
+                                handleError(response.error || '上传失败，请重试');
+                            }
+                        } catch (e) {
+                            handleError('解析响应失败');
+                        }
+                    } else {
+                        handleError('服务器错误：' + xhr.status);
+                    }
+                });
+                
+                // 上传错误事件
+                xhr.addEventListener('error', function() {
+                    handleError('网络错误，上传失败');
+                });
+                
+                // 上传中止事件
+                xhr.addEventListener('abort', function() {
+                    handleError('上传已取消');
+                });
+                
+                // 发送请求
+                xhr.open('POST', '{{ route("import.async") }}', true);
+                xhr.send(formData);
+                
+                // 处理错误函数
+                function handleError(message) {
+                    progressBar.classList.remove('bg-primary');
+                    progressBar.classList.add('bg-danger');
+                    statusText.textContent = '错误: ' + message;
+                    statusText.classList.add('text-danger');
+                    
+                    // 重置按钮状态
+                    setTimeout(function() {
+                        importBtn.disabled = false;
+                        importBtn.innerHTML = '<i class="bi bi-upload"></i> 导入数据';
+                    }, 2000);
+                }
+            });
+        }
     });
 </script>
 @endsection 
