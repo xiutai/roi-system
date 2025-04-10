@@ -14,9 +14,6 @@
 <button type="button" class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#defaultModal">
     <i class="bi bi-gear"></i> 设置默认消耗
 </button>
-<button type="button" id="batchDeleteBtn" class="btn btn-sm btn-danger d-none">
-    <i class="bi bi-trash"></i> 批量删除
-</button>
 @endsection
 
 @section('content')
@@ -57,9 +54,6 @@
             <li>尚未设置默认消耗</li>
         @endforelse
     </ul>
-    <button type="button" class="btn btn-sm btn-outline-info float-end" data-bs-toggle="modal" data-bs-target="#defaultModal">
-        修改默认消耗
-    </button>
 </div>
 
 <!-- 消耗列表 -->
@@ -68,6 +62,11 @@
         <form id="batchDeleteForm" action="{{ route('expenses.batch_destroy') }}" method="POST">
             @csrf
             @method('DELETE')
+            <div class="mb-3">
+                <button type="button" id="batchDeleteBtn" class="btn btn-danger d-none">
+                    <i class="bi bi-trash"></i> 批量删除
+                </button>
+            </div>
             <div class="table-responsive">
                 <table class="table table-striped table-hover">
                     <thead>
@@ -134,6 +133,7 @@
                         <label for="batch_channel_id" class="form-label">渠道</label>
                         <select class="form-select" id="batch_channel_id" name="channel_id" required>
                             <option value="">请选择渠道</option>
+                            <option value="all">全部渠道</option>
                             @foreach($channels as $channel)
                                 <option value="{{ $channel->id }}">{{ $channel->name }}</option>
                             @endforeach
@@ -174,6 +174,7 @@
                         <label for="default_channel_id" class="form-label">渠道</label>
                         <select class="form-select" id="default_channel_id" name="channel_id" required>
                             <option value="">请选择渠道</option>
+                            <option value="all">全部渠道</option>
                             @foreach($channels as $channel)
                                 <option value="{{ $channel->id }}">{{ $channel->name }}</option>
                             @endforeach
@@ -187,6 +188,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <a href="{{ route('expenses.clear_default') }}" class="btn btn-warning" onclick="return confirm('确定要清除所有默认消耗设置吗？')">清除默认消耗</a>
                     <button type="submit" class="btn btn-primary">保存默认消耗</button>
                 </div>
             </form>

@@ -60,6 +60,7 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('/exchange-rates/{exchangeRate}', [ExchangeRateController::class, 'destroy'])->name('exchange_rates.destroy');
     Route::delete('/exchange-rates', [ExchangeRateController::class, 'batchDestroy'])->name('exchange_rates.batch_destroy');
     Route::post('/exchange-rates/default', [ExchangeRateController::class, 'updateDefault'])->name('exchange_rates.update_default');
+    Route::get('/exchange-rates/clear-default', [ExchangeRateController::class, 'clearDefault'])->name('exchange_rates.clear_default');
     Route::post('/exchange-rates/batch', [ExchangeRateController::class, 'batch'])->name('exchange_rates.batch');
 
     // 消耗管理
@@ -71,6 +72,7 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('/expenses/{expense}', [ExpenseController::class, 'destroy'])->name('expenses.destroy');
     Route::delete('/expenses', [ExpenseController::class, 'batchDestroy'])->name('expenses.batch_destroy');
     Route::post('/expenses/default', [ExpenseController::class, 'updateDefault'])->name('expenses.update_default');
+    Route::get('/expenses/clear-default', [ExpenseController::class, 'clearDefault'])->name('expenses.clear_default');
     Route::post('/expenses/batch', [ExpenseController::class, 'batch'])->name('expenses.batch');
 
     // 渠道管理

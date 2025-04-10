@@ -550,14 +550,14 @@ class ProcessImport implements ShouldQueue
             
             // 无论文件大小，都使用精确计数
             $count = $this->estimateCsvRowCount($filePath);
-            
-            $duration = round(microtime(true) - $startTime, 2);
-            Log::info('文件行数计算完成', [
+                
+                $duration = round(microtime(true) - $startTime, 2);
+                Log::info('文件行数计算完成', [
                 'count' => $count,
-                'duration_sec' => $duration,
-                'method' => 'direct_count'
-            ]);
-            
+                    'duration_sec' => $duration,
+                    'method' => 'direct_count'
+                ]);
+                
             return $count;
         } else {
             // 对于Excel文件，使用PHP读取

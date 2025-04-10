@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Expense;
 use App\Models\Channel;
-use App\Models\DailyStatistic;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -68,33 +67,81 @@ class ExpenseController extends Controller
     {
         $request->validate([
             'date' => 'required|date',
-            'channel_id' => 'required|exists:channels,id',
+            'channel_id' => 'required',
             'amount' => 'required|numeric|min:0',
         ]);
         
-        // 检查是否已存在该日期和渠道的消耗记录
-        $exists = Expense::where('date', $request->input('date'))
-                         ->where('channel_id', $request->input('channel_id'))
+        $date = $request->input('date');
+        $channelId = $request->input('channel_id');
+        $amount = $request->input('amount');
+        
+        // 处理全部渠道的情况
+        if ($channelId === 'all') {
+            // 获取所有渠道
+            $channels = Channel::all();
+            $successCount = 0;
+            $skipCount = 0;
+            
+            foreach ($channels as $channel) {
+                // 检查是否已存在该日期和渠道的消耗记录
+                $exists = Expense::where('date', $date)
+                         ->where('channel_id', $channel->id)
                          ->exists();
                          
-        if ($exists) {
-            return back()->with('error', '该日期和渠道的消耗记录已存在。');
-        }
-        
-        $expense = Expense::create([
-            'date' => $request->input('date'),
-            'channel_id' => $request->input('channel_id'),
-            'amount' => $request->input('amount'),
-            'is_default' => false,
-        ]);
+                if ($exists) {
+                    $skipCount++;
+                    continue; // 跳过已存在的记录
+                }
+                
+                // 为每个渠道创建消耗记录
+                Expense::create([
+                    'date' => $date,
+                    'channel_id' => $channel->id,
+                    'amount' => $amount,
+                    'is_default' => false,
+                ]);
+                
+                $successCount++;
+            }
+            
+            // 触发所有渠道的ROI重新计算
+            \App\Models\RoiCalculation::batchCalculateRois(
+                [$date],
+                $channels->pluck('id')->toArray()
+            );
+            
+            $message = "成功为{$successCount}个渠道添加消耗";
+            if ($skipCount > 0) {
+                $message .= "，{$skipCount}个渠道已有消耗记录被跳过";
+            }
+            
+            return redirect()->route('expenses.index')->with('success', $message);
+        } else {
+            // 原有的单个渠道处理逻辑
+            // 检查是否已存在该日期和渠道的消耗记录
+            $exists = Expense::where('date', $date)
+                     ->where('channel_id', $channelId)
+                     ->exists();
+                     
+            if ($exists) {
+                return back()->with('error', '该日期和渠道的消耗记录已存在。');
+            }
+            
+            $expense = Expense::create([
+                'date' => $date,
+                'channel_id' => $channelId,
+                'amount' => $amount,
+                'is_default' => false,
+            ]);
 
-        // 触发 ROI 重新计算
-        \App\Models\RoiCalculation::batchCalculateRois(
-            [$request->input('date')],
-            [$request->input('channel_id')]
-        );
-        
-        return redirect()->route('expenses.index')->with('success', '消耗添加成功。');
+            // 触发 ROI 重新计算
+            \App\Models\RoiCalculation::batchCalculateRois(
+                [$date],
+                [$channelId]
+            );
+            
+            return redirect()->route('expenses.index')->with('success', '消耗添加成功。');
+        }
     }
 
     /**
@@ -145,46 +192,49 @@ class ExpenseController extends Controller
     public function updateDefault(Request $request)
     {
         $request->validate([
-            'channel_id' => 'required|exists:channels,id',
+            'channel_id' => 'required',
             'default_amount' => 'required|numeric|min:0',
         ]);
         
-        // 找到现有的默认消耗或创建新的
-        Expense::updateOrCreate(
-            [
-                'channel_id' => $request->input('channel_id'),
-                'is_default' => true,
-            ],
-            [
-                'date' => Carbon::today(),
-                'amount' => $request->input('default_amount'),
-            ]
-        );
-
-        // 获取所有使用默认消耗的日期
-        $dates = \App\Models\DailyStatistic::where('channel_id', $request->input('channel_id'))
-            ->whereNotExists(function ($query) use ($request) {
-                $query->select(\DB::raw(1))
-                    ->from('expenses')
-                    ->whereColumn('expenses.date', 'daily_statistics.date')
-                    ->where('expenses.channel_id', $request->input('channel_id'))
-                    ->where('expenses.is_default', false);
-            })
-            ->pluck('date')
-            ->map(function ($date) {
-                return $date->format('Y-m-d');
-            })
-            ->toArray();
-
-        // 触发 ROI 重新计算
-        if (!empty($dates)) {
-            \App\Models\RoiCalculation::batchCalculateRois(
-                $dates,
-                [$request->input('channel_id')]
-            );
-        }
+        $defaultAmount = $request->input('default_amount');
+        $channelId = $request->input('channel_id');
         
-        return redirect()->route('expenses.index')->with('success', '默认消耗已更新。');
+        // 处理全部渠道的情况
+        if ($channelId === 'all') {
+            // 获取所有渠道
+            $channels = Channel::all();
+            foreach ($channels as $channel) {
+                // 为每个渠道设置默认消耗
+                Expense::updateOrCreate(
+                    [
+                        'channel_id' => $channel->id,
+                        'is_default' => true,
+                    ],
+                    [
+                        'date' => Carbon::today(),
+                        'amount' => $defaultAmount,
+                    ]
+                );
+            }
+            
+            // 简化: 不需要检查具体日期，直接通知用户已更新
+            return redirect()->route('expenses.index')->with('success', '所有渠道的默认消耗已更新。');
+        } else {
+            // 原有的单个渠道处理逻辑
+            // 找到现有的默认消耗或创建新的
+            Expense::updateOrCreate(
+                [
+                    'channel_id' => $channelId,
+                    'is_default' => true,
+                ],
+                [
+                    'date' => Carbon::today(),
+                    'amount' => $defaultAmount,
+                ]
+            );
+
+            return redirect()->route('expenses.index')->with('success', '默认消耗已更新。');
+        }
     }
 
     /**
@@ -198,7 +248,7 @@ class ExpenseController extends Controller
         $request->validate([
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
-            'channel_id' => 'required|exists:channels,id',
+            'channel_id' => 'required',
             'amount' => 'required|numeric|min:0',
         ]);
         
@@ -207,30 +257,87 @@ class ExpenseController extends Controller
         $channelId = $request->input('channel_id');
         $amount = $request->input('amount');
         
-        $dates = [];
-        for ($date = clone $startDate; $date->lte($endDate); $date->addDay()) {
-            $dateStr = $date->format('Y-m-d');
-            $dates[] = $dateStr;
+        // 处理全部渠道的情况
+        if ($channelId === 'all') {
+            // 获取所有渠道
+            $channels = Channel::all();
+            $successCount = 0;
+            $updateCount = 0;
+            $totalDays = $startDate->diffInDays($endDate) + 1;
             
-            Expense::updateOrCreate(
-                [
-                    'date' => $dateStr,
-                    'channel_id' => $channelId,
-                ],
-                [
-                    'amount' => $amount,
-                    'is_default' => false,
-                ]
-            );
-        }
+            // 为每个渠道设置指定日期范围的消耗
+            foreach ($channels as $channel) {
+                $channelSuccessCount = 0;
+                $channelUpdateCount = 0;
+                $dates = [];
+                
+                for ($date = clone $startDate; $date->lte($endDate); $date->addDay()) {
+                    $dateStr = $date->format('Y-m-d');
+                    $dates[] = $dateStr;
+                    
+                    // 检查是否已存在记录，计算更新和新增数量
+                    $exists = Expense::where('date', $dateStr)
+                            ->where('channel_id', $channel->id)
+                            ->exists();
+                            
+                    if ($exists) {
+                        $channelUpdateCount++;
+                    } else {
+                        $channelSuccessCount++;
+                    }
+                    
+                    // 更新或创建记录
+                    Expense::updateOrCreate(
+                        [
+                            'date' => $dateStr,
+                            'channel_id' => $channel->id,
+                        ],
+                        [
+                            'amount' => $amount,
+                            'is_default' => false,
+                        ]
+                    );
+                }
+                
+                // 触发 ROI 重新计算
+                \App\Models\RoiCalculation::batchCalculateRois(
+                    $dates,
+                    [$channel->id]
+                );
+                
+                $successCount += $channelSuccessCount;
+                $updateCount += $channelUpdateCount;
+            }
+            
+            $message = "成功为所有渠道设置消耗 —— 共{$totalDays}天，{$channels->count()}个渠道，{$successCount}条新增，{$updateCount}条更新";
+            return redirect()->route('expenses.index')->with('success', $message);
+        } else {
+            // 原有的单个渠道处理逻辑
+            $dates = [];
+            for ($date = clone $startDate; $date->lte($endDate); $date->addDay()) {
+                $dateStr = $date->format('Y-m-d');
+                $dates[] = $dateStr;
+                
+                Expense::updateOrCreate(
+                    [
+                        'date' => $dateStr,
+                        'channel_id' => $channelId,
+                    ],
+                    [
+                        'amount' => $amount,
+                        'is_default' => false,
+                    ]
+                );
+            }
 
-        // 触发 ROI 重新计算
-        \App\Models\RoiCalculation::batchCalculateRois(
-            $dates,
-            [$channelId]
-        );
-        
-        return redirect()->route('expenses.index')->with('success', '消耗批量设置成功。');
+            // 触发 ROI 重新计算
+            \App\Models\RoiCalculation::batchCalculateRois(
+                $dates,
+                [$channelId]
+            );
+            
+            return redirect()->route('expenses.index')->with('success', '消耗批量设置成功。');
+        }
     }
 
     /**
@@ -276,5 +383,18 @@ class ExpenseController extends Controller
         Expense::whereIn('id', $ids)->delete();
         
         return redirect()->route('expenses.index')->with('success', '已成功删除 ' . count($ids) . ' 条消耗记录。');
+    }
+
+    /**
+     * 清除默认消耗
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function clearDefault()
+    {
+        // 删除所有默认消耗记录
+        $count = Expense::where('is_default', true)->delete();
+        
+        return redirect()->route('expenses.index')->with('success', "已成功清除 {$count} 个渠道的默认消耗设置。");
     }
 }

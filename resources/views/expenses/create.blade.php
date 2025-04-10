@@ -28,6 +28,7 @@
                         <label for="channel_id" class="form-label">渠道</label>
                         <select class="form-select @error('channel_id') is-invalid @enderror" id="channel_id" name="channel_id" required>
                             <option value="">请选择渠道</option>
+                            <option value="all">全部渠道</option>
                             @foreach($channels as $channel)
                                 <option value="{{ $channel->id }}" {{ old('channel_id') == $channel->id ? 'selected' : '' }}>{{ $channel->name }}</option>
                             @endforeach

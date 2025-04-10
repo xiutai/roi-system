@@ -215,4 +215,17 @@ class ExchangeRateController extends Controller
         
         return redirect()->route('exchange_rates.index')->with('success', '已成功删除 ' . count($ids) . ' 条汇率记录。');
     }
+
+    /**
+     * 清除默认汇率
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function clearDefault()
+    {
+        // 删除所有默认汇率记录
+        $count = ExchangeRate::where('is_default', true)->delete();
+        
+        return redirect()->route('exchange_rates.index')->with('success', "已成功清除默认汇率设置。");
+    }
 }

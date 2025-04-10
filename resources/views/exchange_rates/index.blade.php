@@ -14,9 +14,6 @@
 <button type="button" class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#defaultModal">
     <i class="bi bi-gear"></i> 设置默认汇率
 </button>
-<button type="button" id="batchDeleteBtn" class="btn btn-sm btn-danger d-none">
-    <i class="bi bi-trash"></i> 批量删除
-</button>
 @endsection
 
 @section('content')
@@ -41,9 +38,6 @@
 <!-- 默认汇率信息 -->
 <div class="alert alert-info">
     <strong>默认汇率：</strong> {{ $defaultRate ? $defaultRate->rate : '未设置' }}
-    <button type="button" class="btn btn-sm btn-outline-info float-end" data-bs-toggle="modal" data-bs-target="#defaultModal">
-        修改默认汇率
-    </button>
 </div>
 
 <!-- 汇率列表 -->
@@ -52,6 +46,11 @@
         <form id="batchDeleteForm" action="{{ route('exchange_rates.batch_destroy') }}" method="POST">
             @csrf
             @method('DELETE')
+            <div class="mb-3">
+                <button type="button" id="batchDeleteBtn" class="btn btn-danger d-none">
+                    <i class="bi bi-trash"></i> 批量删除
+                </button>
+            </div>
             <div class="table-responsive">
                 <table class="table table-striped table-hover">
                     <thead>
@@ -151,6 +150,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <a href="{{ route('exchange_rates.clear_default') }}" class="btn btn-warning" onclick="return confirm('确定要清除默认汇率设置吗？')">清除默认汇率</a>
                     <button type="submit" class="btn btn-primary">保存默认汇率</button>
                 </div>
             </form>
