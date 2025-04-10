@@ -275,28 +275,6 @@ class ImportController extends Controller
                 return response()->json(['success' => false, 'message' => '不支持的文件类型: ' . $extension . '，只支持CSV格式'], 400);
             }
             
-            // 确保storage/app/imports目录存在
-            $importDir = storage_path('app/imports');
-            if (!file_exists($importDir)) {
-                if (!mkdir($importDir, 0755, true)) {
-                    return response()->json(['success' => false, 'message' => '无法创建导入目录，请检查权限'], 500);
-                }
-            }
-            
-            // 生成唯一文件名
-            $filename = Str::uuid() . '.' . $extension;
-            $fullPath = $importDir . '/' . $filename;
-            
-            // 直接使用PHP的文件函数移动上传的文件
-            if (!move_uploaded_file($file->getRealPath(), $fullPath)) {
-                return response()->json(['success' => false, 'message' => '文件保存失败，请检查存储权限'], 500);
-            }
-            
-            // 验证文件是否可读
-            if (!is_readable($fullPath)) {
-                return response()->json(['success' => false, 'message' => '保存的文件无法读取，请检查权限'], 500);
-            }
-            
             // 获取插入日期，默认为当天
             $insertDate = $request->filled('insert_date') 
                 ? Carbon::parse($request->input('insert_date'))->format('Y-m-d')
@@ -304,6 +282,11 @@ class ImportController extends Controller
             
             // 检查是否存在相同insert_date的数据
             $isReplacingExisting = Transaction::where('insert_date', $insertDate)->exists();
+            
+            // 生成唯一文件名
+            $filename = Str::uuid() . '.' . $extension;
+            $importDir = storage_path('app/imports');
+            $fullPath = $importDir . '/' . $filename;
             
             // 创建导入任务记录
             $importJob = ImportJob::create([
@@ -319,28 +302,68 @@ class ImportController extends Controller
             
             // 检查记录是否成功创建
             if (!$importJob || !$importJob->id) {
-                // 删除已上传的文件
-                @unlink($fullPath);
                 return response()->json(['success' => false, 'message' => '创建导入任务记录失败'], 500);
             }
             
-            // 记录日志
-            Log::info('异步上传：导入任务创建成功', [
-                'job_id' => $importJob->id,
-                'filename' => $filename,
-                'original_filename' => $originalFilename,
-                'insert_date' => $insertDate
-            ]);
-            
-            // 分发异步任务处理导入
-            ProcessImport::dispatch($importJob);
-            
-            return response()->json([
+            // 立即返回响应，让客户端知道我们已收到文件
+            $jobId = $importJob->id;
+            $response = response()->json([
                 'success' => true, 
-                'message' => '文件已上传，开始后台处理',
-                'job_id' => $importJob->id,
+                'message' => '文件已接收，开始后台处理',
+                'job_id' => $jobId,
                 'is_replacing' => $isReplacingExisting
             ]);
+            
+            // 关闭输出缓冲区
+            if (ob_get_level()) ob_end_clean();
+            
+            // 发送响应头
+            header('Connection: close');
+            header('Content-Length: '.ob_get_length());
+            
+            // 发送响应并关闭连接
+            echo $response->getContent();
+            
+            // 刷新并关闭当前会话
+            session_write_close();
+            
+            // 告诉PHP忽略用户中止
+            ignore_user_abort(true);
+            
+            // 设置无限执行时间
+            set_time_limit(0);
+            
+            // 进行文件处理，不阻塞客户端
+            if (!file_exists($importDir)) {
+                mkdir($importDir, 0755, true);
+            }
+            
+            // 移动上传的文件
+            if (move_uploaded_file($file->getRealPath(), $fullPath)) {
+                // 记录日志
+                Log::info('异步上传：文件保存成功', [
+                    'job_id' => $jobId,
+                    'filename' => $filename,
+                    'original_filename' => $originalFilename
+                ]);
+                
+                // 分发异步任务处理导入
+                ProcessImport::dispatch($importJob);
+            } else {
+                // 记录错误并更新任务状态
+                Log::error('异步上传：文件保存失败', [
+                    'job_id' => $jobId,
+                    'filename' => $filename
+                ]);
+                
+                $importJob->update([
+                    'status' => 'failed',
+                    'error_message' => '文件保存失败',
+                    'completed_at' => now()
+                ]);
+            }
+            
+            exit(0); // 脚本结束，但服务器继续处理
             
         } catch (\Exception $e) {
             Log::error('异步上传失败', [

@@ -663,7 +663,7 @@ class ProcessImport implements ShouldQueue
             if (!$headers) {
                 throw new \Exception("无法读取CSV标题行");
             }
-
+            
             // 将标题行转为字段映射
             $headerMap = $this->mapHeaders($headers);
             
@@ -703,7 +703,7 @@ class ProcessImport implements ShouldQueue
             
             // 设置CSV文件总行数（估计值，用于进度计算）
             $totalRows = $this->estimateCsvRowCount($filePath);
-            $this->importJob->update([
+                    $this->importJob->update([
                 'total_rows' => $totalRows
             ]);
             
@@ -725,9 +725,9 @@ class ProcessImport implements ShouldQueue
                 // 如果是空行就跳过
                 if (empty(array_filter($row, function($val) { return $val !== null; }))) {
                     $skippedCount++;
-                    continue;
-                }
-                
+                        continue;
+                    }
+                    
                 try {
                     // 映射CSV列到字段
                     $mappedRow = [];
@@ -769,7 +769,7 @@ class ProcessImport implements ShouldQueue
                     
                     // 处理特殊字符等
                     if (is_string($rawBalance)) {
-                        $rawBalance = preg_replace('/[^\d.-]/', '', $rawBalance); // 只保留数字、小数点和负号
+                    $rawBalance = preg_replace('/[^\d.-]/', '', $rawBalance); // 只保留数字、小数点和负号
                     }
                     
                     if (is_numeric($rawBalance)) {
@@ -869,7 +869,7 @@ class ProcessImport implements ShouldQueue
             return true;
         } catch (\Exception $e) {
             // 更新导入任务状态为失败
-            $this->importJob->update([
+                $this->importJob->update([
                 'status' => 'failed',
                 'error_message' => $e->getMessage(),
                 'completed_at' => now()
@@ -894,7 +894,7 @@ class ProcessImport implements ShouldQueue
             DB::table('transactions')->insert($records);
             DB::commit();
             return count($records);
-        } catch (\Exception $e) {
+                    } catch (\Exception $e) {
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
