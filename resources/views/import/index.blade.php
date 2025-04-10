@@ -317,18 +317,53 @@
                             if (response.success) {
                                 progressBar.style.width = '100%';
                                 progressBar.textContent = '100%';
-                                statusText.textContent = '上传成功！文件已在后台处理中，页面将在3秒后刷新...';
+                                
+                                // 更改状态文本为正在处理
+                                statusText.textContent = '文件已上传，正在后台处理中...';
                                 statusText.classList.add('text-success');
                                 
-                                // 3秒后刷新页面
+                                // 修改按钮文本
+                                importBtn.disabled = true;
+                                importBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> 处理中...';
+                                
+                                // 创建刷新按钮，允许用户手动刷新页面
+                                const refreshButton = document.createElement('button');
+                                refreshButton.type = 'button';
+                                refreshButton.className = 'btn btn-outline-primary ms-2';
+                                refreshButton.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 刷新状态';
+                                refreshButton.addEventListener('click', function() {
+                                    window.location.reload();
+                                });
+                                
+                                // 将刷新按钮添加到表单后面
+                                importBtn.parentNode.appendChild(refreshButton);
+                                
+                                // 设置定时刷新（10秒后刷新页面）
                                 setTimeout(function() {
                                     window.location.reload();
-                                }, 3000);
+                                }, 10000);
+                                
+                                // 创建一个轮询任务来检查任务状态
+                                let checkCount = 0;
+                                const maxChecks = 5;
+                                
+                                function checkJobStatus() {
+                                    if (checkCount >= maxChecks) return;
+                                    
+                                    checkCount++;
+                                    statusText.textContent = `文件已上传，正在后台处理中...(${checkCount}/${maxChecks})`;
+                                    
+                                    // 再次检查，直到达到最大检查次数
+                                    setTimeout(checkJobStatus, 2000);
+                                }
+                                
+                                // 开始轮询
+                                setTimeout(checkJobStatus, 2000);
                             } else {
                                 handleError(response.error || '上传失败，请重试');
                             }
                         } catch (e) {
-                            handleError('解析响应失败');
+                            handleError('解析响应失败: ' + e.message);
                         }
                     } else {
                         handleError('服务器错误：' + xhr.status);
