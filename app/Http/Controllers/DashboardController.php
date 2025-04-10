@@ -385,36 +385,65 @@ class DashboardController extends Controller
                 $summaryData['first_deposit_price'] = round($summaryData['expense'] / $summaryData['paying_users'], 2);
             }
             
-            // 计算总体ROI
-            if ($summaryData['expense'] > 0 && $defaultRateValue > 0) {
-                // 不要对ROI进行四舍五入处理，直接使用计算值
-                $summaryData['daily_roi'] = ($summaryData['balance'] / $defaultRateValue) / $summaryData['expense'] * 100;
-            }
-            
             // 为汇总数据添加ROI趋势数据
             $summaryData['roi_trends'] = array_fill_keys([2, 3, 5, 7, 14, 30, 40], 0);
             $summaryData['roi_after_40'] = 0;
             
-            // 使用最新日期的数据作为汇总趋势数据的基准
-            $latestDate = end($actualDisplayDates);
-            if ($latestDate && isset($dailyStats[$latestDate])) {
-                // 获取当日ROI
-                $summaryData['daily_roi'] = $dailyStats[$latestDate]['daily_roi'];
+            // 使用时间段内最早的日期作为汇总趋势数据的基准
+            $earliestDate = reset($actualDisplayDates); // 获取第一个元素（最早的日期）
+            
+            if ($earliestDate && isset($dailyStats[$earliestDate])) {
+                // 初始化基础消耗和余额数据
+                $earliestExpense = $dailyStats[$earliestDate]['expense'] ?? 0;
                 
-                // 获取2,3,5,7,14,30日ROI
-                foreach ([2, 3, 5, 7, 14, 30] as $day) {
-                    $summaryData['roi_trends'][$day] = $dailyStats[$latestDate]['roi_trends'][$day];
+                // 计算当日ROI（使用最早日期的数据）
+                if ($earliestExpense > 0 && $defaultRateValue > 0) {
+                    $earliestBalance = $dailyStats[$earliestDate]['balance'] ?? 0;
+                    $summaryData['daily_roi'] = ($earliestBalance / $defaultRateValue) / $earliestExpense * 100;
                 }
                 
-                // 判断最新日期是否满足40天条件
-                $latestDateObj = Carbon::parse($latestDate);
-                $today = Carbon::today();
-                $daysSinceLatest = $latestDateObj->diffInDays($today);
+                // 计算多日ROI（2日、3日、5日等）
+                foreach ([2, 3, 5, 7, 14, 30, 40] as $dayCount) {
+                    // 获取从最早日期开始的多天数据
+                    $cumulativeBalance = 0;
+                    $validDateCount = 0;
+                    
+                    for ($i = 0; $i < $dayCount; $i++) {
+                        $targetDateObj = Carbon::parse($earliestDate)->addDays($i);
+                        $targetDate = $targetDateObj->format('Y-m-d');
+                        
+                        // 如果该日期存在于统计数据中，则累加余额
+                        if (isset($dailyStats[$targetDate])) {
+                            $cumulativeBalance += $dailyStats[$targetDate]['balance'] ?? 0;
+                            $validDateCount++;
+                        }
+                    }
+                    
+                    // 只有当累计了足够的日期数据才计算ROI
+                    if ($validDateCount > 0 && $earliestExpense > 0 && $defaultRateValue > 0) {
+                        $summaryData['roi_trends'][$dayCount] = ($cumulativeBalance / $defaultRateValue) / $earliestExpense * 100;
+                    }
+                }
                 
-                // 只有当天数差大于等于40天时，才使用40日和40日后ROI
-                if ($daysSinceLatest >= 40) {
-                    $summaryData['roi_trends'][40] = $dailyStats[$latestDate]['roi_trends'][40];
-                    $summaryData['roi_after_40'] = $dailyStats[$latestDate]['roi_after_40'];
+                // 判断是否可以计算40天后的ROI
+                $earliestDateObj = Carbon::parse($earliestDate);
+                $today = Carbon::today();
+                $daysSinceEarliest = $earliestDateObj->diffInDays($today);
+                
+                // 只有当天数差大于等于40天时，才计算40日后ROI
+                if ($daysSinceEarliest >= 40) {
+                    // 计算40天后的累计余额
+                    $balanceAfter40 = 0;
+                    $targetDateObj = Carbon::parse($earliestDate)->addDays(40);
+                    $targetDate = $targetDateObj->format('Y-m-d');
+                    
+                    if (isset($dailyStats[$targetDate])) {
+                        $balanceAfter40 = $dailyStats[$targetDate]['balance'] ?? 0;
+                        
+                        if ($earliestExpense > 0 && $defaultRateValue > 0) {
+                            $summaryData['roi_after_40'] = ($balanceAfter40 / $defaultRateValue) / $earliestExpense * 100;
+                        }
+                    }
                 }
             }
             
