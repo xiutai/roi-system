@@ -544,71 +544,21 @@ class ProcessImport implements ShouldQueue
     protected function countFileRows($filePath, $extension)
     {
         if (in_array($extension, ['csv', 'txt'])) {
-            // 优化的行数计算方法
+            // 使用精确的行数计算方法
             Log::info('开始计算文件行数');
             $startTime = microtime(true);
             
-            // 对于大文件，使用采样方法估计行数
-            $fileSize = filesize($filePath);
+            // 无论文件大小，都使用精确计数
+            $count = $this->estimateCsvRowCount($filePath);
             
-            if ($fileSize > 50 * 1024 * 1024) { // 大于50MB的文件
-                Log::info('文件较大，使用采样估算行数');
-                
-                // 采样前1MB和最后1MB，计算平均行长度
-                $handle = fopen($filePath, "r");
-                if (!$handle) {
-                    return 0;
-                }
-                
-                // 读取前1MB
-                $sampleSize = 1024 * 1024; // 1MB
-                $firstSample = fread($handle, $sampleSize);
-                $firstLineCount = substr_count($firstSample, "\n");
-                
-                // 读取最后1MB
-                fseek($handle, -$sampleSize, SEEK_END);
-                $lastSample = fread($handle, $sampleSize);
-                $lastLineCount = substr_count($lastSample, "\n");
-                
-                fclose($handle);
-                
-                // 计算平均每MB行数
-                $avgLinesPerMB = ($firstLineCount + $lastLineCount) / 2;
-                
-                // 估计总行数（减去可能的标题行）
-                $estimatedLines = (int)($avgLinesPerMB * ($fileSize / (1024 * 1024))) - 1;
-                
-                $duration = round(microtime(true) - $startTime, 2);
-                Log::info('文件行数估算完成', [
-                    'estimated_rows' => $estimatedLines,
-                    'duration_sec' => $duration,
-                    'method' => 'sampling'
-                ]);
-                
-                return max(0, $estimatedLines);
-            } else {
-                // 对于较小文件，直接计算
-                $lineCount = 0;
-                $handle = fopen($filePath, "r");
-                if ($handle) {
-                    while(!feof($handle)) {
-                        $line = fgets($handle);
-                        if ($line !== false) {
-                            $lineCount++;
-                        }
-                    }
-                    fclose($handle);
-                }
-                
-                $duration = round(microtime(true) - $startTime, 2);
-                Log::info('文件行数计算完成', [
-                    'count' => $lineCount - 1, // 减去标题行
-                    'duration_sec' => $duration,
-                    'method' => 'direct_count'
-                ]);
-                
-                return max(0, $lineCount - 1); // 减去标题行，确保不为负数
-            }
+            $duration = round(microtime(true) - $startTime, 2);
+            Log::info('文件行数计算完成', [
+                'count' => $count,
+                'duration_sec' => $duration,
+                'method' => 'direct_count'
+            ]);
+            
+            return $count;
         } else {
             // 对于Excel文件，使用PHP读取
             try {
@@ -912,30 +862,44 @@ class ProcessImport implements ShouldQueue
     protected function estimateCsvRowCount($filePath)
     {
         try {
+            // 使用更准确的计数方法
             $lineCount = 0;
             $handle = fopen($filePath, 'r');
-            while (!feof($handle)) {
-                $line = fgets($handle);
-                $lineCount++;
-                // 只读取前1000行，然后进行估算
-                if ($lineCount >= 1000) {
-                    break;
-                }
+            
+            if (!$handle) {
+                Log::warning('无法打开CSV文件进行行数计算', ['file' => basename($filePath)]);
+                return 0;
             }
-            $fileSize = filesize($filePath);
-            $currentPosition = ftell($handle);
+            
+            // 读取标题行，不计入总行数
+            $headers = fgetcsv($handle);
+            if ($headers === false) {
+                Log::warning('CSV文件为空或格式错误', ['file' => basename($filePath)]);
+                fclose($handle);
+                return 0;
+            }
+            
+            // 逐行计数
+            while (($data = fgetcsv($handle)) !== FALSE) {
+                // 跳过空行
+                if (empty(array_filter($data))) {
+                    continue;
+                }
+                $lineCount++;
+            }
+            
             fclose($handle);
             
-            if ($currentPosition > 0 && $lineCount > 0) {
-                // 估算总行数：文件大小与已读取大小的比例 * 已读取行数
-                $estimatedRows = ceil($fileSize / $currentPosition * $lineCount);
-                return min($estimatedRows, 1000000); // 限制最大估计行数
-            }
+            // 记录准确的行数
+            Log::info('精确计算CSV文件行数', [
+                'file' => basename($filePath),
+                'exact_line_count' => $lineCount
+            ]);
             
             return $lineCount;
         } catch (\Exception $e) {
-            Log::warning('无法估算CSV行数', ['error' => $e->getMessage()]);
-            return 10000; // 默认返回一个合理的值
+            Log::warning('计算CSV行数失败', ['error' => $e->getMessage()]);
+            return 0; // 出错时返回0，而不是估计值
         }
     }
     
