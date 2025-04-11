@@ -178,33 +178,51 @@
                         
                         <!-- 当日ROI数据 -->
                         <td class="align-middle {{ ($summaryData['daily_roi'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['daily_roi'] ?? 0, 2) }}%
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['roi_calculations']['daily'] }}">
+                                {{ number_format($summaryData['daily_roi'] ?? 0, 2) }}%
+                            </span>
                         </td>
                         
                         <!-- 汇总行的多日ROI数据 -->
                         <td class="align-middle {{ ($summaryData['roi_trends'][2] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['roi_trends'][2] ?? 0, 2) }}%
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['roi_calculations']['trends'][2] }}">
+                                {{ number_format($summaryData['roi_trends'][2] ?? 0, 2) }}%
+                            </span>
                         </td>
                         <td class="align-middle {{ ($summaryData['roi_trends'][3] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['roi_trends'][3] ?? 0, 2) }}%
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['roi_calculations']['trends'][3] }}">
+                                {{ number_format($summaryData['roi_trends'][3] ?? 0, 2) }}%
+                            </span>
                         </td>
                         <td class="align-middle {{ ($summaryData['roi_trends'][5] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['roi_trends'][5] ?? 0, 2) }}%
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['roi_calculations']['trends'][5] }}">
+                                {{ number_format($summaryData['roi_trends'][5] ?? 0, 2) }}%
+                            </span>
                         </td>
                         <td class="align-middle {{ ($summaryData['roi_trends'][7] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['roi_trends'][7] ?? 0, 2) }}%
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['roi_calculations']['trends'][7] }}">
+                                {{ number_format($summaryData['roi_trends'][7] ?? 0, 2) }}%
+                            </span>
                         </td>
                         <td class="align-middle {{ ($summaryData['roi_trends'][14] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['roi_trends'][14] ?? 0, 2) }}%
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['roi_calculations']['trends'][14] }}">
+                                {{ number_format($summaryData['roi_trends'][14] ?? 0, 2) }}%
+                            </span>
                         </td>
                         <td class="align-middle {{ ($summaryData['roi_trends'][30] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['roi_trends'][30] ?? 0, 2) }}%
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['roi_calculations']['trends'][30] }}">
+                                {{ number_format($summaryData['roi_trends'][30] ?? 0, 2) }}%
+                            </span>
                         </td>
                         <td class="align-middle {{ ($summaryData['roi_trends'][40] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['roi_trends'][40] ?? 0, 2) }}%
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['roi_calculations']['trends'][40] }}">
+                                {{ number_format($summaryData['roi_trends'][40] ?? 0, 2) }}%
+                            </span>
                         </td>
                         <td class="align-middle {{ ($summaryData['roi_after_40'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                            {{ number_format($summaryData['roi_after_40'] ?? 0, 2) }}%
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['roi_calculations']['after_40'] }}">
+                                {{ number_format($summaryData['roi_after_40'] ?? 0, 2) }}%
+                            </span>
                         </td>
                     </tr>
                     
@@ -222,33 +240,51 @@
                             
                             <!-- 当日ROI数据 -->
                             <td class="align-middle {{ ($row['daily_roi'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['daily_roi'] ?? 0, 2) }}%
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['roi_calculations']['daily'] }}">
+                                    {{ number_format($row['daily_roi'] ?? 0, 2) }}%
+                                </span>
                             </td>
                             
                             <!-- 多日ROI数据 -->
                             <td class="align-middle {{ ($row['roi_trends'][2] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['roi_trends'][2] ?? 0, 2) }}%
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['roi_calculations']['trends'][2] }}">
+                                    {{ number_format($row['roi_trends'][2] ?? 0, 2) }}%
+                                </span>
                             </td>
                             <td class="align-middle {{ ($row['roi_trends'][3] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['roi_trends'][3] ?? 0, 2) }}%
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['roi_calculations']['trends'][3] }}">
+                                    {{ number_format($row['roi_trends'][3] ?? 0, 2) }}%
+                                </span>
                             </td>
                             <td class="align-middle {{ ($row['roi_trends'][5] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['roi_trends'][5] ?? 0, 2) }}%
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['roi_calculations']['trends'][5] }}">
+                                    {{ number_format($row['roi_trends'][5] ?? 0, 2) }}%
+                                </span>
                             </td>
                             <td class="align-middle {{ ($row['roi_trends'][7] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['roi_trends'][7] ?? 0, 2) }}%
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['roi_calculations']['trends'][7] }}">
+                                    {{ number_format($row['roi_trends'][7] ?? 0, 2) }}%
+                                </span>
                             </td>
                             <td class="align-middle {{ ($row['roi_trends'][14] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['roi_trends'][14] ?? 0, 2) }}%
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['roi_calculations']['trends'][14] }}">
+                                    {{ number_format($row['roi_trends'][14] ?? 0, 2) }}%
+                                </span>
                             </td>
                             <td class="align-middle {{ ($row['roi_trends'][30] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['roi_trends'][30] ?? 0, 2) }}%
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['roi_calculations']['trends'][30] }}">
+                                    {{ number_format($row['roi_trends'][30] ?? 0, 2) }}%
+                                </span>
                             </td>
                             <td class="align-middle {{ ($row['roi_trends'][40] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['roi_trends'][40] ?? 0, 2) }}%
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['roi_calculations']['trends'][40] }}">
+                                    {{ number_format($row['roi_trends'][40] ?? 0, 2) }}%
+                                </span>
                             </td>
                             <td class="align-middle {{ ($row['roi_after_40'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
-                                {{ number_format($row['roi_after_40'] ?? 0, 2) }}%
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['roi_calculations']['after_40'] }}">
+                                    {{ number_format($row['roi_after_40'] ?? 0, 2) }}%
+                                </span>
                             </td>
                         </tr>
                     @empty
@@ -306,8 +342,8 @@
 <script src="https://cdn.jsdelivr.net/npm/moment/moment.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
-<script type="text/javascript">
-    document.addEventListener('DOMContentLoaded', function() {
+<script>
+    $(document).ready(function() {
         // 初始化日期选择器
         $('#daterangepicker').daterangepicker({
             locale: {
@@ -332,7 +368,6 @@
             }
         });
         
-        // 当选择日期时更新输入框
         $('#daterangepicker').on('apply.daterangepicker', function(ev, picker) {
             $(this).val(picker.startDate.format('YYYY-MM-DD') + ' - ' + picker.endDate.format('YYYY-MM-DD'));
         });
@@ -340,95 +375,86 @@
         $('#daterangepicker').on('cancel.daterangepicker', function(ev, picker) {
             $(this).val('');
         });
-
-        // 检查Chart.js库是否正确加载
-        if (typeof Chart === 'undefined') {
-            return;
-        }
         
-        // 获取日期数据
-        const dates = JSON.parse('{!! json_encode($actualDisplayDates ?? []) !!}');
-        
-        // 格式化日期为更短的形式 (MM-DD)
-        const formattedDates = dates.map(date => {
-            const parts = date.split('-');
-            return `${parts[1]}-${parts[2]}`;
-        }).reverse(); // 反转使日期左侧为旧日期，右侧为新日期
-        
-        // 获取图表数据并反转顺序，使其与日期对应
-        const chartSeries = JSON.parse('{!! json_encode($chartSeries) !!}');
-        
-        chartSeries.forEach(series => {
-            series.data = series.data.slice();
-        });
-        
-        // 设置颜色 - 参考图1的配色方案
-        const colors = [
-            'rgba(24, 144, 255, 1)',    // 首日ROI - 蓝色
-            'rgba(47, 194, 91, 1)',     // 2日ROI - 绿色
-            'rgba(250, 84, 28, 1)',     // 3日ROI - 橙红色
-            'rgba(250, 173, 20, 1)',    // 5日ROI - 橙黄色
-            'rgba(114, 46, 209, 1)',    // 7日ROI - 紫色
-            'rgba(245, 34, 45, 1)',     // 14日ROI - 红色
-            'rgba(19, 194, 194, 1)',    // 30日ROI - 青色
-            'rgba(82, 196, 26, 1)',     // 40日ROI - 浅绿色
-        ];
-        
-        // 准备数据集
-        const datasets = chartSeries.map((series, index) => {
-            return {
-                label: series.name,
-                data: series.data,
-                borderColor: colors[index % colors.length],
-                backgroundColor: colors[index % colors.length].replace('1)', '0.1)'),
-                borderWidth: 2,
-                pointRadius: 4,
-                pointHoverRadius: 6,
-                tension: 0.2
-            };
-        });
-        
-        // 创建图表
-        const ctx = document.getElementById('roiChart');
-        
-        if (!ctx) {
-            return;
-        }
-        
-        // 清除可能的旧图表实例
-        if (window.roiChartInstance) {
-            window.roiChartInstance.destroy();
-        }
-        
-        // 简化图表配置
-        window.roiChartInstance = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: formattedDates,
-                datasets: datasets
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return context.dataset.label + ': ' + context.raw.toFixed(2) + '%';
+        // 初始化ROI趋势图
+        const roiChart = document.getElementById('roiChart');
+        if (roiChart) {
+            const labels = {!! json_encode(array_reverse($actualDisplayDates ?? [])) !!};
+            const datasets = {!! json_encode($chartSeries ?? []) !!};
+            
+            new Chart(roiChart, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                boxWidth: 10
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += new Intl.NumberFormat('zh-CN', { 
+                                            style: 'percent', 
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2 
+                                        }).format(context.parsed.y / 100);
+                                    }
+                                    return label;
+                                }
                             }
                         }
-                    }
-                },
-                scales: {
-                    y: {
-                        ticks: {
-                            callback: function(value) {
-                                return value + '%';
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                display: true,
+                                drawBorder: true,
+                                drawOnChartArea: true
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            },
+                            grid: {
+                                drawBorder: true,
+                                drawOnChartArea: true
                             }
                         }
                     }
                 }
-            }
+            });
+        }
+        
+        // 初始化工具提示
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl, {
+                html: true,
+                placement: 'top',
+                trigger: 'hover'
+            });
         });
     });
 </script>

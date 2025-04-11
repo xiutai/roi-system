@@ -385,69 +385,107 @@ class DashboardController extends Controller
                 $summaryData['first_deposit_price'] = round($summaryData['expense'] / $summaryData['paying_users'], 2);
             }
             
-            // 为汇总数据添加ROI趋势数据
+            // 初始化ROI趋势数据数组
             $summaryData['roi_trends'] = array_fill_keys([2, 3, 5, 7, 14, 30, 40], 0);
             $summaryData['roi_after_40'] = 0;
             
-            // 获取实际显示的日期（按升序排序）
-            $sortedDates = $actualDisplayDates;
-            sort($sortedDates);
+            // 添加计算过程详情数组
+            $summaryData['roi_calculations'] = [
+                'daily' => '',
+                'trends' => array_fill_keys([2, 3, 5, 7, 14, 30, 40], ''),
+                'after_40' => ''
+            ];
             
-            // 获取筛选时间段中最早的日期
-            $earliestDate = !empty($sortedDates) ? reset($sortedDates) : null;
+            // 按时间升序排序，找到最早的日期
+            sort($actualDisplayDates);
+            $earliestDate = null;
+            
+            // 寻找最早有消耗的日期
+            foreach ($actualDisplayDates as $dateStr) {
+                if (isset($dailyStats[$dateStr]) && 
+                    isset($dailyStats[$dateStr]['expense']) && 
+                    $dailyStats[$dateStr]['expense'] > 0 &&
+                    isset($dailyStats[$dateStr]['rate_value']) && 
+                    $dailyStats[$dateStr]['rate_value'] > 0) {
+                    $earliestDate = $dateStr;
+                    break;
+                }
+            }
             
             if ($earliestDate && isset($dailyStats[$earliestDate])) {
-                // 计算总体ROI（基于最早日期的数据）
-                if ($summaryData['expense'] > 0 && $defaultRateValue > 0) {
-                    // 总当日ROI = (当前筛选时间段中最早一天的充提差额/默认汇率)/当前筛选时间段总消耗*100%
-                    $earliestDayBalance = $dailyStats[$earliestDate]['balance'];
-                    $summaryData['daily_roi'] = ($earliestDayBalance / $defaultRateValue) / $summaryData['expense'] * 100;
-                    
-                    // 计算2,3,5,7,14,30,40日ROI
-                    $dayRanges = [2, 3, 5, 7, 14, 30, 40];
-                    
-                    foreach ($dayRanges as $day) {
-                        // 找出从最早日期开始，往后推day-1天的日期
-                        $targetDateObj = Carbon::parse($earliestDate)->addDays($day - 1);
-                        $targetDate = $targetDateObj->format('Y-m-d');
+                $earliestRateValue = $dailyStats[$earliestDate]['rate_value'] ?? $defaultRateValue;
+                
+                // 确保使用有效数据进行计算
+                if ($summaryData['expense'] > 0 && $earliestRateValue > 0) {
+                    // 遍历所有有效日期以确保数据存在
+                    foreach ($actualDisplayDates as $dateKey => $dateStr) {
+                        if (!isset($dailyStats[$dateStr]) || !isset($dailyStats[$dateStr]['balance'])) {
+                            continue;
+                        }
                         
-                        // 如果目标日期在我们的统计数据中
-                        if (isset($dailyStats[$targetDate])) {
-                            // 计算从最早日期到目标日期的充提差额总和
-                            $cumulativeBalance = 0;
-                            foreach ($sortedDates as $date) {
-                                if ($date <= $targetDate && isset($dailyStats[$date])) {
-                                    $cumulativeBalance += $dailyStats[$date]['balance'];
-                                }
-                                
-                                // 如果达到目标日期，跳出循环
-                                if ($date >= $targetDate) {
-                                    break;
+                        // 当前日期余额
+                        $currentDateBalance = $dailyStats[$dateStr]['balance'];
+                        
+                        // 计算从最早有消耗日期到当前日期的天数差
+                        $earliestDateObj = Carbon::parse($earliestDate);
+                        $currentDateObj = Carbon::parse($dateStr);
+                        $daysDiff = $earliestDateObj->diffInDays($currentDateObj);
+                        
+                        // 如果是最早有消耗日期，计算当日ROI
+                        if ($dateStr === $earliestDate) {
+                            $summaryData['daily_roi'] = ($currentDateBalance / $earliestRateValue) / $summaryData['expense'] * 100;
+                            
+                            // 添加计算过程详情
+                            $summaryData['roi_calculations']['daily'] = "({$currentDateBalance} / {$earliestRateValue}) / {$summaryData['expense']} * 100 = " . number_format($summaryData['daily_roi'], 2) . "%";
+                        }
+                        
+                        // 如果是后续日期，根据天数差匹配对应的ROI趋势数据
+                        if ($currentDateObj->gt($earliestDateObj)) {
+                            // 查找匹配的天数范围
+                            foreach ([2, 3, 5, 7, 14, 30, 40] as $day) {
+                                if ($daysDiff == ($day - 1)) { // 因为是从0开始计算天数差的
+                                    $summaryData['roi_trends'][$day] = ($currentDateBalance / $earliestRateValue) / $summaryData['expense'] * 100;
+                                    
+                                    // 添加计算过程详情
+                                    $summaryData['roi_calculations']['trends'][$day] = "({$currentDateBalance} / {$earliestRateValue}) / {$summaryData['expense']} * 100 = " . number_format($summaryData['roi_trends'][$day], 2) . "%";
                                 }
                             }
                             
-                            // 总X日ROI = (当前筛选时间段中最早一天+X-1天的累计充提差额/默认汇率)/当前筛选时间段总消耗*100%
-                            $summaryData['roi_trends'][$day] = ($cumulativeBalance / $defaultRateValue) / $summaryData['expense'] * 100;
+                            // 40日后ROI
+                            if ($daysDiff >= 40) {
+                                $summaryData['roi_after_40'] = ($currentDateBalance / $earliestRateValue) / $summaryData['expense'] * 100;
+                                
+                                // 添加计算过程详情
+                                $summaryData['roi_calculations']['after_40'] = "({$currentDateBalance} / {$earliestRateValue}) / {$summaryData['expense']} * 100 = " . number_format($summaryData['roi_after_40'], 2) . "%";
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 对每日数据添加计算过程详情
+            foreach ($dailyStats as $dateStr => &$daily) {
+                // 初始化计算过程详情数组
+                $daily['roi_calculations'] = [
+                    'daily' => '',
+                    'trends' => array_fill_keys([2, 3, 5, 7, 14, 30, 40], ''),
+                    'after_40' => ''
+                ];
+                
+                if ($daily['expense'] > 0 && ($daily['rate_value'] ?? 0) > 0) {
+                    // 当日ROI计算过程
+                    $daily['roi_calculations']['daily'] = "({$daily['balance']} / {$daily['rate_value']}) / {$daily['expense']} * 100 = " . number_format($daily['daily_roi'], 2) . "%";
+                    
+                    // 多日ROI计算过程
+                    foreach ([2, 3, 5, 7, 14, 30, 40] as $day) {
+                        if (isset($daily['roi_trends'][$day]) && $daily['roi_trends'][$day] > 0) {
+                            $daily['roi_calculations']['trends'][$day] = "({$daily['balance']} / {$daily['rate_value']}) / {$daily['expense']} * 100 = " . number_format($daily['roi_trends'][$day], 2) . "%";
                         }
                     }
                     
-                    // 计算40日后ROI
-                    $day40Date = Carbon::parse($earliestDate)->addDays(39)->format('Y-m-d');
-                    $after40DateObj = Carbon::parse($earliestDate)->addDays(40);
-                    $after40Dates = $sortedDates;
-                    
-                    // 筛选出40天后的日期
-                    $after40Balance = 0;
-                    foreach ($after40Dates as $date) {
-                        $dateObj = Carbon::parse($date);
-                        if ($dateObj->gte($after40DateObj) && isset($dailyStats[$date])) {
-                            $after40Balance += $dailyStats[$date]['balance'];
-                        }
-                    }
-                    
-                    // 如果有40天后的数据，计算40日后ROI
-                    if ($after40Balance > 0) {
-                        $summaryData['roi_after_40'] = ($after40Balance / $defaultRateValue) / $summaryData['expense'] * 100;
+                    // 40日后ROI计算过程
+                    if ($daily['roi_after_40'] > 0) {
+                        $daily['roi_calculations']['after_40'] = "({$daily['balance']} / {$daily['rate_value']}) / {$daily['expense']} * 100 = " . number_format($daily['roi_after_40'], 2) . "%";
                     }
                 }
             }
