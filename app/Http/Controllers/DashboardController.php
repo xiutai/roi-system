@@ -338,16 +338,26 @@ class DashboardController extends Controller
             // 准备图表数据
             $chartSeries = [];
             $chartDayRanges = [1, 2, 3, 5, 7, 14, 30, 40]; // 包括1日ROI
+            $chartColors = [
+                'rgba(24, 144, 255, 1)',    // 当日ROI - 蓝色
+                'rgba(47, 194, 91, 1)',     // 2日ROI - 绿色
+                'rgba(250, 84, 28, 1)',     // 3日ROI - 橙红色
+                'rgba(250, 173, 20, 1)',    // 5日ROI - 橙黄色
+                'rgba(114, 46, 209, 1)',    // 7日ROI - 紫色
+                'rgba(245, 34, 45, 1)',     // 14日ROI - 红色
+                'rgba(19, 194, 194, 1)',    // 30日ROI - 青色
+                'rgba(82, 196, 26, 1)',     // 40日ROI - 浅绿色
+            ];
             
             // 获取实际显示的日期
             $actualDisplayDates = array_keys($dailyStats);
             sort($actualDisplayDates); // 按日期升序排序
             
-            foreach ($chartDayRanges as $days) {
+            foreach ($chartDayRanges as $index => $days) {
                 $seriesData = [];
                 
-                // 按时间顺序排序，最新日期在右边
-                foreach (array_reverse($actualDisplayDates) as $dateStr) {
+                // 按时间顺序排序，最早日期在左边（不需要反转）
+                foreach ($actualDisplayDates as $dateStr) {
                     if ($days == 1) {
                         // 1日ROI等于当日ROI
                         $value = $dailyStats[$dateStr]['daily_roi'] ?? 0;
@@ -358,8 +368,13 @@ class DashboardController extends Controller
                 }
                 
                 $chartSeries[] = [
-                    'name' => $days == 1 ? "当日ROI" : "{$days}日ROI",
-                    'data' => $seriesData
+                    'label' => $days == 1 ? "当日ROI" : "{$days}日ROI",
+                    'data' => $seriesData,
+                    'borderColor' => $chartColors[$index % count($chartColors)],
+                    'backgroundColor' => str_replace('1)', '0.1)', $chartColors[$index % count($chartColors)]),
+                    'borderWidth' => 2,
+                    'pointRadius' => 3,
+                    'tension' => 0.2
                 ];
             }
             
@@ -374,22 +389,60 @@ class DashboardController extends Controller
                 ]
             ];
             
-            // 计算汇总数据行的平均值
-            if ($summaryData['registrations'] > 0) {
-                $summaryData['conversion_rate'] = round(($summaryData['paying_users'] / $summaryData['registrations']) * 100, 2);
-                $summaryData['arpu'] = round($summaryData['balance'] / $summaryData['registrations'], 2);
-                $summaryData['cpa'] = round($summaryData['expense'] / $summaryData['registrations'], 2);
-                
-                // 添加计算公式详情
-                $summaryData['formula_details']['cpa'] = "消耗 / 新增用户数 = {$summaryData['expense']} / {$summaryData['registrations']} = {$summaryData['cpa']}";
-                $summaryData['formula_details']['conversion_rate'] = "首充人数 / 新增用户数 × 100% = {$summaryData['paying_users']} / {$summaryData['registrations']} × 100% = {$summaryData['conversion_rate']}%";
+            // ======= 修改汇总数据计算方式 =======
+            // 获取最新插入日期（用于计算不受日期筛选影响的汇总数据）
+            $latestInsertDateQuery = DB::table('transactions');
+            if ($channelId) {
+                $latestInsertDateQuery->where('channel_id', $channelId);
             }
+            $latestInsertDate = $latestInsertDateQuery->max('insert_date');
             
-            if ($summaryData['paying_users'] > 0) {
-                $summaryData['first_deposit_price'] = round($summaryData['expense'] / $summaryData['paying_users'], 2);
+            if ($latestInsertDate) {
+                // 单次查询获取所有汇总数据（替代多次查询）
+                $summaryStats = DB::table('transactions')
+                    ->where('insert_date', $latestInsertDate)
+                    ->when($channelId, function ($query) use ($channelId) {
+                        return $query->where('channel_id', $channelId);
+                    })
+                    ->selectRaw('
+                        COUNT(DISTINCT member_id) as total_registrations,
+                        COUNT(DISTINCT CASE WHEN balance_difference > 0 THEN member_id END) as deposit_users,
+                        SUM(balance_difference) as total_balance
+                    ')->first();
                 
-                // 添加计算公式详情
-                $summaryData['formula_details']['first_deposit_price'] = "消耗 / 首充人数 = {$summaryData['expense']} / {$summaryData['paying_users']} = {$summaryData['first_deposit_price']}";
+                // 获取所有消耗（对应最新插入日期的数据）
+                $totalExpense = DB::table('expenses')
+                    ->when($channelId, function ($query) use ($channelId) {
+                        return $query->where(function($q) use ($channelId) {
+                            $q->where('channel_id', $channelId)
+                                ->orWhere('is_default', true);
+                        });
+                    })
+                    ->sum('amount');
+                
+                // 更新汇总数据
+                $summaryData['registrations'] = $summaryStats->total_registrations ?? 0;
+                $summaryData['paying_users'] = $summaryStats->deposit_users ?? 0;
+                $summaryData['balance'] = $summaryStats->total_balance ?? 0;
+                $summaryData['expense'] = $totalExpense;
+                
+                // 重新计算衍生指标
+                if ($summaryData['registrations'] > 0) {
+                    $summaryData['conversion_rate'] = round(($summaryData['paying_users'] / $summaryData['registrations']) * 100, 2);
+                    $summaryData['arpu'] = round($summaryData['balance'] / $summaryData['registrations'], 2);
+                    $summaryData['cpa'] = round($summaryData['expense'] / $summaryData['registrations'], 2);
+                    
+                    // 添加计算公式详情
+                    $summaryData['formula_details']['cpa'] = "消耗 / 新增用户数 = {$summaryData['expense']} / {$summaryData['registrations']} = {$summaryData['cpa']}";
+                    $summaryData['formula_details']['conversion_rate'] = "首充人数 / 新增用户数 × 100% = {$summaryData['paying_users']} / {$summaryData['registrations']} × 100% = {$summaryData['conversion_rate']}%";
+                }
+                
+                if ($summaryData['paying_users'] > 0) {
+                    $summaryData['first_deposit_price'] = round($summaryData['expense'] / $summaryData['paying_users'], 2);
+                    
+                    // 添加计算公式详情
+                    $summaryData['formula_details']['first_deposit_price'] = "消耗 / 首充人数 = {$summaryData['expense']} / {$summaryData['paying_users']} = {$summaryData['first_deposit_price']}";
+                }
             }
             
             // 初始化ROI趋势数据数组
@@ -404,12 +457,11 @@ class DashboardController extends Controller
             ];
             
             // 获取最早一次数据插入的时间
-            $earliestInsertDateQuery = DB::table('transactions');
-            // 如果有渠道筛选
-            if ($channelId) {
-                $earliestInsertDateQuery->where('channel_id', $channelId);
-            }
-            $earliestInsertDate = $earliestInsertDateQuery->min('insert_date');
+            $earliestInsertDate = $latestInsertDate ? DB::table('transactions')
+                ->when($channelId, function ($query) use ($channelId) {
+                    return $query->where('channel_id', $channelId);
+                })
+                ->min('insert_date') : null;
             
             // 如果没有找到插入日期，使用今天的日期作为默认值
             if (empty($earliestInsertDate)) {
@@ -421,17 +473,18 @@ class DashboardController extends Controller
             
             // 确保总消耗不为0
             if ($summaryData['expense'] > 0 && $rateValue > 0) {
-                // 获取所有在该插入日期的交易数据
-                $transactionsQuery = DB::table('transactions')
-                    ->where('insert_date', $earliestInsertDate);
-                
-                // 如果有渠道筛选
-                if ($channelId) {
-                    $transactionsQuery->where('channel_id', $channelId);
-                }
+                // 预先查询所有相关的交易数据，避免多次查询
+                $allTransactions = DB::table('transactions')
+                    ->select('insert_date', DB::raw('SUM(balance_difference) as total_balance'))
+                    ->when($channelId, function ($query) use ($channelId) {
+                        return $query->where('channel_id', $channelId);
+                    })
+                    ->groupBy('insert_date')
+                    ->get()
+                    ->keyBy('insert_date');
                 
                 // 获取该插入日期的总充提差额
-                $totalBalanceDifference = $transactionsQuery->sum('balance_difference');
+                $totalBalanceDifference = $allTransactions->get($earliestInsertDate)->total_balance ?? 0;
                 
                 // 计算当日ROI
                 $summaryData['daily_roi'] = ($totalBalanceDifference / $rateValue) / $summaryData['expense'] * 100;
@@ -439,27 +492,21 @@ class DashboardController extends Controller
                 
                 // 检查后续日期是否有数据
                 $dayRanges = [2, 3, 5, 7, 14, 30, 40];
+                
+                // 提前计算所有目标日期
+                $targetDates = [];
+                $earliestDateObj = Carbon::parse($earliestInsertDate);
                 foreach ($dayRanges as $day) {
-                    // 计算对应的日期
-                    $targetDate = Carbon::parse($earliestInsertDate)->addDays($day - 1)->format('Y-m-d');
+                    $targetDate = $earliestDateObj->copy()->addDays($day - 1)->format('Y-m-d');
+                    $targetDates[$day] = $targetDate;
+                }
+                
+                foreach ($dayRanges as $day) {
+                    $targetDate = $targetDates[$day];
                     
-                    // 检查该日期是否有数据插入
-                    $hasDataForDay = DB::table('transactions')
-                        ->where('insert_date', $targetDate)
-                        ->exists();
-                    
-                    if ($hasDataForDay) {
-                        // 获取该日期的交易数据
-                        $targetDayQuery = DB::table('transactions')
-                            ->where('insert_date', $targetDate);
-                        
-                        // 如果有渠道筛选
-                        if ($channelId) {
-                            $targetDayQuery->where('channel_id', $channelId);
-                        }
-                        
-                        // 获取该日期的总充提差额
-                        $targetDayBalance = $targetDayQuery->sum('balance_difference');
+                    // 直接从预先查询的数据中获取
+                    if ($allTransactions->has($targetDate)) {
+                        $targetDayBalance = $allTransactions->get($targetDate)->total_balance;
                         
                         // 计算该天的ROI
                         $summaryData['roi_trends'][$day] = ($targetDayBalance / $rateValue) / $summaryData['expense'] * 100;
@@ -472,24 +519,17 @@ class DashboardController extends Controller
                 }
                 
                 // 40日后ROI - 检查是否有40天后的数据
-                $afterFortyDate = Carbon::parse($earliestInsertDate)->addDays(40)->format('Y-m-d');
-                $hasAfterFortyData = DB::table('transactions')
-                    ->where('insert_date', '>=', $afterFortyDate)
-                    ->exists();
+                $afterFortyDate = $targetDates[40];
                 
-                if ($hasAfterFortyData) {
-                    // 获取40天后的所有交易数据
-                    $afterFortyQuery = DB::table('transactions')
-                        ->where('insert_date', '>=', $afterFortyDate);
-                    
-                    // 如果有渠道筛选
-                    if ($channelId) {
-                        $afterFortyQuery->where('channel_id', $channelId);
-                    }
-                    
-                    // 获取40天后的总充提差额
-                    $afterFortyBalance = $afterFortyQuery->sum('balance_difference');
-                    
+                // 计算40天后的所有交易数据
+                $afterFortyBalance = DB::table('transactions')
+                    ->where('insert_date', '>=', $afterFortyDate)
+                    ->when($channelId, function ($query) use ($channelId) {
+                        return $query->where('channel_id', $channelId);
+                    })
+                    ->sum('balance_difference');
+                
+                if ($afterFortyBalance > 0) {
                     // 计算40天后的ROI
                     $summaryData['roi_after_40'] = ($afterFortyBalance / $rateValue) / $summaryData['expense'] * 100;
                     $summaryData['roi_calculations']['after_40'] = "({$afterFortyBalance} / {$rateValue}) / {$summaryData['expense']} * 100 = " . number_format($summaryData['roi_after_40'], 2) . "%";
@@ -525,21 +565,104 @@ class DashboardController extends Controller
                     $daily['formula_details']['first_deposit_price'] = "消耗 / 首充人数 = {$daily['expense']} / {$daily['paying_users']} = {$daily['first_deposit_price']}";
                 }
                 
+                // 只对有消耗的日期计算ROI
                 if ($daily['expense'] > 0 && ($daily['rate_value'] ?? 0) > 0) {
-                    // 当日ROI计算过程
-                    $daily['roi_calculations']['daily'] = "({$daily['balance']} / {$daily['rate_value']}) / {$daily['expense']} * 100 = " . number_format($daily['daily_roi'], 2) . "%";
+                    $currentDate = Carbon::parse($dateStr);
+                    $rateValue = $daily['rate_value'] ?? $defaultRateValue;
                     
-                    // 多日ROI计算过程
-                    foreach ([2, 3, 5, 7, 14, 30, 40] as $day) {
-                        if (isset($daily['roi_trends'][$day]) && $daily['roi_trends'][$day] > 0) {
-                            $daily['roi_calculations']['trends'][$day] = "({$daily['balance']} / {$daily['rate_value']}) / {$daily['expense']} * 100 = " . number_format($daily['roi_trends'][$day], 2) . "%";
+                    // 计算当日ROI - 基于当日插入的当日充提差额
+                    $sameDayInsertQuery = DB::table('transactions')
+                        ->where('insert_date', $dateStr)
+                        ->where(DB::raw('DATE(registration_time)'), $dateStr);
+                    
+                    // 如果有渠道筛选
+                    if ($channelId) {
+                        $sameDayInsertQuery->where('channel_id', $channelId);
+                    }
+                    
+                    $sameDayBalance = $sameDayInsertQuery->sum('balance_difference');
+                    
+                    if ($sameDayBalance != 0) {
+                        $daily['daily_roi'] = ($sameDayBalance / $rateValue) / $daily['expense'] * 100;
+                        $daily['roi_calculations']['daily'] = "({$sameDayBalance} / {$rateValue}) / {$daily['expense']} * 100 = " . number_format($daily['daily_roi'], 2) . "%";
+                    } else {
+                        $daily['daily_roi'] = 0;
+                        $daily['roi_calculations']['daily'] = "当日({$dateStr})无插入数据，ROI为0";
+                    }
+                    
+                    // 计算多日ROI
+                    $dayRanges = [2, 3, 5, 7, 14, 30, 40];
+                    foreach ($dayRanges as $day) {
+                        // 计算目标日期
+                        $targetDate = $currentDate->copy()->addDays($day - 1)->format('Y-m-d');
+                        
+                        // 检查目标日期是否有插入数据
+                        $hasTargetDateData = DB::table('transactions')
+                            ->where('insert_date', $targetDate)
+                            ->where(DB::raw('DATE(registration_time)'), $dateStr)
+                            ->exists();
+                        
+                        if ($hasTargetDateData) {
+                            // 查询目标日期插入的与当日关联的充提差额
+                            $targetDateQuery = DB::table('transactions')
+                                ->where('insert_date', $targetDate)
+                                ->where(DB::raw('DATE(registration_time)'), $dateStr);
+                            
+                            // 如果有渠道筛选
+                            if ($channelId) {
+                                $targetDateQuery->where('channel_id', $channelId);
+                            }
+                            
+                            $targetDateBalance = $targetDateQuery->sum('balance_difference');
+                            
+                            // 计算ROI
+                            $daily['roi_trends'][$day] = ($targetDateBalance / $rateValue) / $daily['expense'] * 100;
+                            $daily['roi_calculations']['trends'][$day] = "({$targetDateBalance} / {$rateValue}) / {$daily['expense']} * 100 = " . number_format($daily['roi_trends'][$day], 2) . "%";
+                        } else {
+                            $daily['roi_trends'][$day] = 0;
+                            $daily['roi_calculations']['trends'][$day] = "无{$targetDate}插入关联{$dateStr}的数据，ROI为0";
                         }
                     }
                     
-                    // 40日后ROI计算过程
-                    if ($daily['roi_after_40'] > 0) {
-                        $daily['roi_calculations']['after_40'] = "({$daily['balance']} / {$daily['rate_value']}) / {$daily['expense']} * 100 = " . number_format($daily['roi_after_40'], 2) . "%";
+                    // 40日后ROI
+                    $afterFortyDate = $currentDate->copy()->addDays(40)->format('Y-m-d');
+                    $hasAfterFortyData = DB::table('transactions')
+                        ->where('insert_date', '>=', $afterFortyDate)
+                        ->where(DB::raw('DATE(registration_time)'), $dateStr)
+                        ->exists();
+                    
+                    if ($hasAfterFortyData) {
+                        // 查询40天后插入的与当日关联的充提差额
+                        $afterFortyQuery = DB::table('transactions')
+                            ->where('insert_date', '>=', $afterFortyDate)
+                            ->where(DB::raw('DATE(registration_time)'), $dateStr);
+                        
+                        // 如果有渠道筛选
+                        if ($channelId) {
+                            $afterFortyQuery->where('channel_id', $channelId);
+                        }
+                        
+                        $afterFortyBalance = $afterFortyQuery->sum('balance_difference');
+                        
+                        // 计算ROI
+                        $daily['roi_after_40'] = ($afterFortyBalance / $rateValue) / $daily['expense'] * 100;
+                        $daily['roi_calculations']['after_40'] = "({$afterFortyBalance} / {$rateValue}) / {$daily['expense']} * 100 = " . number_format($daily['roi_after_40'], 2) . "%";
+                    } else {
+                        $daily['roi_after_40'] = 0;
+                        $daily['roi_calculations']['after_40'] = "无{$afterFortyDate}后插入关联{$dateStr}的数据，ROI为0";
                     }
+                } else {
+                    // 无消耗或无汇率，所有ROI为0
+                    $daily['daily_roi'] = 0;
+                    $daily['roi_calculations']['daily'] = "无消耗或无汇率，ROI为0";
+                    
+                    foreach ([2, 3, 5, 7, 14, 30, 40] as $day) {
+                        $daily['roi_trends'][$day] = 0;
+                        $daily['roi_calculations']['trends'][$day] = "无消耗或无汇率，ROI为0";
+                    }
+                    
+                    $daily['roi_after_40'] = 0;
+                    $daily['roi_calculations']['after_40'] = "无消耗或无汇率，ROI为0";
                 }
             }
             

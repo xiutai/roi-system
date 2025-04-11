@@ -403,7 +403,7 @@
         // 初始化ROI趋势图
         const roiChart = document.getElementById('roiChart');
         if (roiChart) {
-            const labels = {!! json_encode(array_reverse($actualDisplayDates ?? [])) !!};
+            const labels = {!! json_encode($actualDisplayDates ?? []) !!};
             const datasets = {!! json_encode($chartSeries ?? []) !!};
             
             new Chart(roiChart, {
@@ -420,11 +420,22 @@
                         intersect: false
                     },
                     plugins: {
+                        title: {
+                            display: true,
+                            text: 'ROI趋势图',
+                            font: {
+                                size: 16
+                            }
+                        },
                         legend: {
+                            display: true,
                             position: 'top',
                             labels: {
                                 usePointStyle: true,
-                                boxWidth: 10
+                                boxWidth: 10,
+                                font: {
+                                    size: 12
+                                }
                             }
                         },
                         tooltip: {
@@ -435,11 +446,7 @@
                                         label += ': ';
                                     }
                                     if (context.parsed.y !== null) {
-                                        label += new Intl.NumberFormat('zh-CN', { 
-                                            style: 'percent', 
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2 
-                                        }).format(context.parsed.y / 100);
+                                        label += context.parsed.y.toFixed(2) + '%';
                                     }
                                     return label;
                                 }
@@ -452,6 +459,10 @@
                                 display: true,
                                 drawBorder: true,
                                 drawOnChartArea: true
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
                             }
                         },
                         y: {
