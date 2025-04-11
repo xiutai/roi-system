@@ -379,10 +379,17 @@ class DashboardController extends Controller
                 $summaryData['conversion_rate'] = round(($summaryData['paying_users'] / $summaryData['registrations']) * 100, 2);
                 $summaryData['arpu'] = round($summaryData['balance'] / $summaryData['registrations'], 2);
                 $summaryData['cpa'] = round($summaryData['expense'] / $summaryData['registrations'], 2);
+                
+                // 添加计算公式详情
+                $summaryData['formula_details']['cpa'] = "消耗 / 新增用户数 = {$summaryData['expense']} / {$summaryData['registrations']} = {$summaryData['cpa']}";
+                $summaryData['formula_details']['conversion_rate'] = "首充人数 / 新增用户数 × 100% = {$summaryData['paying_users']} / {$summaryData['registrations']} × 100% = {$summaryData['conversion_rate']}%";
             }
             
             if ($summaryData['paying_users'] > 0) {
                 $summaryData['first_deposit_price'] = round($summaryData['expense'] / $summaryData['paying_users'], 2);
+                
+                // 添加计算公式详情
+                $summaryData['formula_details']['first_deposit_price'] = "消耗 / 首充人数 = {$summaryData['expense']} / {$summaryData['paying_users']} = {$summaryData['first_deposit_price']}";
             }
             
             // 初始化ROI趋势数据数组
@@ -501,6 +508,22 @@ class DashboardController extends Controller
                     'trends' => array_fill_keys([2, 3, 5, 7, 14, 30, 40], ''),
                     'after_40' => ''
                 ];
+                
+                // 添加CPA、首充单价和付费率的计算公式
+                $daily['formula_details'] = [
+                    'cpa' => '',
+                    'first_deposit_price' => '',
+                    'conversion_rate' => ''
+                ];
+                
+                if ($daily['registrations'] > 0) {
+                    $daily['formula_details']['cpa'] = "消耗 / 新增用户数 = {$daily['expense']} / {$daily['registrations']} = {$daily['cpa']}";
+                    $daily['formula_details']['conversion_rate'] = "首充人数 / 新增用户数 × 100% = {$daily['paying_users']} / {$daily['registrations']} × 100% = {$daily['conversion_rate']}%";
+                }
+                
+                if ($daily['paying_users'] > 0) {
+                    $daily['formula_details']['first_deposit_price'] = "消耗 / 首充人数 = {$daily['expense']} / {$daily['paying_users']} = {$daily['first_deposit_price']}";
+                }
                 
                 if ($daily['expense'] > 0 && ($daily['rate_value'] ?? 0) > 0) {
                     // 当日ROI计算过程

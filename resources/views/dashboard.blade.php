@@ -171,10 +171,22 @@
                         <td class="align-middle">{{ $selectedChannelName ?? '全部渠道' }}</td>
                         <td class="align-middle">${{ number_format($summaryData['expense'], 2) }}</td>
                         <td class="align-middle">{{ $summaryData['registrations'] }}</td>
-                        <td class="align-middle">${{ number_format($summaryData['cpa'], 2) }}</td>
+                        <td class="align-middle">
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['formula_details']['cpa'] }}">
+                                ${{ number_format($summaryData['cpa'], 2) }}
+                            </span>
+                        </td>
                         <td class="align-middle">{{ $summaryData['paying_users'] }}</td>
-                        <td class="align-middle">${{ number_format($summaryData['first_deposit_price'] ?? 0, 2) }}</td>
-                        <td class="align-middle">{{ number_format($summaryData['conversion_rate'], 2) }}%</td>
+                        <td class="align-middle">
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['formula_details']['first_deposit_price'] }}">
+                                ${{ number_format($summaryData['first_deposit_price'] ?? 0, 2) }}
+                            </span>
+                        </td>
+                        <td class="align-middle">
+                            <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $summaryData['formula_details']['conversion_rate'] }}">
+                                {{ number_format($summaryData['conversion_rate'], 2) }}%
+                            </span>
+                        </td>
                         
                         <!-- 当日ROI数据 -->
                         <td class="align-middle {{ ($summaryData['daily_roi'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
@@ -233,10 +245,22 @@
                             <td>{{ $selectedChannelName ?? '全部渠道' }}</td>
                             <td>${{ number_format($row['expense'], 2) }}</td>
                             <td>{{ $row['registrations'] }}</td>
-                            <td>${{ number_format($row['cpa'], 2) }}</td>
+                            <td>
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['formula_details']['cpa'] }}">
+                                    ${{ number_format($row['cpa'], 2) }}
+                                </span>
+                            </td>
                             <td>{{ $row['paying_users'] }}</td>
-                            <td>${{ number_format($row['first_deposit_price'] ?? 0, 2) }}</td>
-                            <td>{{ number_format($row['conversion_rate'], 2) }}%</td>
+                            <td>
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['formula_details']['first_deposit_price'] }}">
+                                    ${{ number_format($row['first_deposit_price'] ?? 0, 2) }}
+                                </span>
+                            </td>
+                            <td>
+                                <span data-bs-toggle="tooltip" data-bs-html="true" title="{{ $row['formula_details']['conversion_rate'] }}">
+                                    {{ number_format($row['conversion_rate'], 2) }}%
+                                </span>
+                            </td>
                             
                             <!-- 当日ROI数据 -->
                             <td class="align-middle {{ ($row['daily_roi'] ?? 0) > 0 ? 'text-success fw-bold' : 'text-danger' }}">
