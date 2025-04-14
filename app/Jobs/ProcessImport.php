@@ -362,41 +362,91 @@ class ProcessImport implements ShouldQueue
                         // 获取或创建渠道
                         if (!isset($channels[$registrationSource])) {
                             try {
-                                // 记录创建渠道前的详细信息
-                                Log::info('尝试创建新渠道', [
-                                    'source' => $registrationSource,
-                                    'binary_representation' => bin2hex($registrationSource),
-                                    'current_charset' => mb_detect_encoding($registrationSource, ['UTF-8', 'GBK', 'GB2312', 'ASCII'], true),
-                                    'length' => mb_strlen($registrationSource),
+                                // 确保渠道名称使用正确的编码 - 加强转换方式
+                                $originalSource = $registrationSource;
+                                $encodedSource = $this->ensureCorrectEncoding($registrationSource);
+                                
+                                // 检查编码转换前后是否有变化
+                                $sourceChanged = ($encodedSource !== $originalSource);
+                                
+                                // 记录原始数据和编码转换结果
+                                Log::info('处理渠道编码', [
+                                    'original' => $originalSource,
+                                    'original_hex' => bin2hex($originalSource),
+                                    'converted' => $encodedSource,
+                                    'converted_hex' => bin2hex($encodedSource),
+                                    'encoding_changed' => $sourceChanged,
                                     'row' => $processedRows
                                 ]);
                                 
-                                // 创建新渠道
-                                $channel = Channel::firstOrCreate(
-                                    ['name' => $registrationSource],
-                                    ['description' => '从导入数据自动创建']
-                                );
-                                $channels[$registrationSource] = $channel->id;
+                                // 使用转换后的渠道名称
+                                $registrationSource = $encodedSource;
                                 
-                                // 记录创建成功
-                                Log::info('渠道创建成功', [
-                                    'name' => $registrationSource,
-                                    'id' => $channel->id
-                                ]);
-                            } catch (\Exception $channelError) {
-                                // 提供更详细的错误信息
-                                Log::error('渠道创建失败', [
-                                    'source' => $registrationSource,
-                                    'binary_representation' => bin2hex($registrationSource),
-                                    'error' => $channelError->getMessage(),
-                                    'error_code' => $channelError->getCode(),
-                                    'error_file' => $channelError->getFile(),
-                                    'error_line' => $channelError->getLine(),
-                                    'row' => $processedRows
+                                // 再次检查已存在的渠道映射
+                                if (isset($channels[$registrationSource])) {
+                                    Log::info('编码转换后找到已存在的渠道', [
+                                        'source' => $registrationSource,
+                                        'channel_id' => $channels[$registrationSource]
+                                    ]);
+                                    continue;
+                                }
+                                
+                                // 先按名称查找是否已存在该渠道
+                                $existingChannel = Channel::where('name', $registrationSource)->first();
+                                
+                                if ($existingChannel) {
+                                    // 如果已存在，直接使用
+                                    $channels[$registrationSource] = $existingChannel->id;
+                                    Log::info('找到已存在的渠道', [
+                                        'source' => $registrationSource,
+                                        'channel_id' => $existingChannel->id
+                                    ]);
+                                } else {
+                                    // 创建新渠道，使用转换后的名称
+                                    $channel = new Channel();
+                                    $channel->name = $registrationSource;
+                                    $channel->description = '从导入数据自动创建';
+                                    $channel->save();
+                                    
+                                    $channels[$registrationSource] = $channel->id;
+                                    
+                                    Log::info('渠道创建成功', [
+                                        'source' => $registrationSource,
+                                        'channel_id' => $channel->id
+                                    ]);
+                                }
+                            } catch (\Exception $e) {
+                                // 记录详细错误信息
+                                Log::error('渠道创建异常', [
+                                    'source' => $registrationSource ?? 'unknown',
+                                    'hex' => isset($registrationSource) ? bin2hex($registrationSource) : '',
+                                    'error' => $e->getMessage(),
+                                    'error_code' => $e->getCode(),
+                                    'error_trace' => array_slice($e->getTrace(), 0, 3)
                                 ]);
                                 
-                                // 继续抛出异常，让外层捕获
-                                throw $channelError;
+                                // 遇到错误时使用默认渠道
+                                $defaultChannelName = '默认渠道';
+                                if (!isset($channels[$defaultChannelName])) {
+                                    // 查找或创建默认渠道
+                                    $defaultChannel = Channel::firstOrCreate(
+                                        ['name' => $defaultChannelName],
+                                        ['description' => '导入数据默认渠道']
+                                    );
+                                    $channels[$defaultChannelName] = $defaultChannel->id;
+                                    
+                                    Log::info('创建默认渠道', [
+                                        'channel_id' => $defaultChannel->id
+                                    ]);
+                                }
+                                
+                                // 将错误的渠道映射到默认渠道
+                                $channels[$registrationSource] = $channels[$defaultChannelName];
+                                
+                                Log::info('使用默认渠道', [
+                                    'original_source' => $registrationSource,
+                                    'default_channel_id' => $channels[$defaultChannelName]
+                                ]);
                             }
                         }
                         
@@ -767,41 +817,91 @@ class ProcessImport implements ShouldQueue
                     // 获取或创建渠道
                     if (!isset($channels[$registrationSource])) {
                         try {
-                            // 记录创建渠道前的详细信息
-                            Log::info('尝试创建新渠道', [
-                                'source' => $registrationSource,
-                                'binary_representation' => bin2hex($registrationSource),
-                                'current_charset' => mb_detect_encoding($registrationSource, ['UTF-8', 'GBK', 'GB2312', 'ASCII'], true),
-                                'length' => mb_strlen($registrationSource),
+                            // 确保渠道名称使用正确的编码 - 加强转换方式
+                            $originalSource = $registrationSource;
+                            $encodedSource = $this->ensureCorrectEncoding($registrationSource);
+                            
+                            // 检查编码转换前后是否有变化
+                            $sourceChanged = ($encodedSource !== $originalSource);
+                            
+                            // 记录原始数据和编码转换结果
+                            Log::info('处理渠道编码', [
+                                'original' => $originalSource,
+                                'original_hex' => bin2hex($originalSource),
+                                'converted' => $encodedSource,
+                                'converted_hex' => bin2hex($encodedSource),
+                                'encoding_changed' => $sourceChanged,
                                 'row' => $rowCount
                             ]);
                             
-                            // 创建新渠道
-                            $channel = Channel::firstOrCreate(
-                                ['name' => $registrationSource],
-                                ['description' => '从导入数据自动创建']
-                            );
-                            $channels[$registrationSource] = $channel->id;
+                            // 使用转换后的渠道名称
+                            $registrationSource = $encodedSource;
                             
-                            // 记录创建成功
-                            Log::info('渠道创建成功', [
-                                'name' => $registrationSource,
-                                'id' => $channel->id
-                            ]);
-                        } catch (\Exception $channelError) {
-                            // 提供更详细的错误信息
-                            Log::error('渠道创建失败', [
-                                'source' => $registrationSource,
-                                'binary_representation' => bin2hex($registrationSource),
-                                'error' => $channelError->getMessage(),
-                                'error_code' => $channelError->getCode(),
-                                'error_file' => $channelError->getFile(),
-                                'error_line' => $channelError->getLine(),
-                                'row' => $rowCount
+                            // 再次检查已存在的渠道映射
+                            if (isset($channels[$registrationSource])) {
+                                Log::info('编码转换后找到已存在的渠道', [
+                                    'source' => $registrationSource,
+                                    'channel_id' => $channels[$registrationSource]
+                                ]);
+                                continue;
+                            }
+                            
+                            // 先按名称查找是否已存在该渠道
+                            $existingChannel = Channel::where('name', $registrationSource)->first();
+                            
+                            if ($existingChannel) {
+                                // 如果已存在，直接使用
+                                $channels[$registrationSource] = $existingChannel->id;
+                                Log::info('找到已存在的渠道', [
+                                    'source' => $registrationSource,
+                                    'channel_id' => $existingChannel->id
+                                ]);
+                            } else {
+                                // 创建新渠道，使用转换后的名称
+                                $channel = new Channel();
+                                $channel->name = $registrationSource;
+                                $channel->description = '从导入数据自动创建';
+                                $channel->save();
+                                
+                                $channels[$registrationSource] = $channel->id;
+                                
+                                Log::info('渠道创建成功', [
+                                    'source' => $registrationSource,
+                                    'channel_id' => $channel->id
+                                ]);
+                            }
+                        } catch (\Exception $e) {
+                            // 记录详细错误信息
+                            Log::error('渠道创建异常', [
+                                'source' => $registrationSource ?? 'unknown',
+                                'hex' => isset($registrationSource) ? bin2hex($registrationSource) : '',
+                                'error' => $e->getMessage(),
+                                'error_code' => $e->getCode(),
+                                'error_trace' => array_slice($e->getTrace(), 0, 3)
                             ]);
                             
-                            // 继续抛出异常，让外层捕获
-                            throw $channelError;
+                            // 遇到错误时使用默认渠道
+                            $defaultChannelName = '默认渠道';
+                            if (!isset($channels[$defaultChannelName])) {
+                                // 查找或创建默认渠道
+                                $defaultChannel = Channel::firstOrCreate(
+                                    ['name' => $defaultChannelName],
+                                    ['description' => '导入数据默认渠道']
+                                );
+                                $channels[$defaultChannelName] = $defaultChannel->id;
+                                
+                                Log::info('创建默认渠道', [
+                                    'channel_id' => $defaultChannel->id
+                                ]);
+                            }
+                            
+                            // 将错误的渠道映射到默认渠道
+                            $channels[$registrationSource] = $channels[$defaultChannelName];
+                            
+                            Log::info('使用默认渠道', [
+                                'original_source' => $registrationSource,
+                                'default_channel_id' => $channels[$defaultChannelName]
+                            ]);
                         }
                     }
                     
@@ -1188,8 +1288,6 @@ class ProcessImport implements ShouldQueue
         // 处理Excel导出的特殊格式 ="xxx"
         if (preg_match('/^="(.*)"$/', $str, $matches)) {
             $str = $matches[1];
-            // 记录处理过的字符串(调试需要时)
-            // Log::debug('处理Excel特殊格式', ['original' => $str, 'processed' => $matches[1]]);
         }
         
         // 处理可能的双重引号
@@ -1197,17 +1295,50 @@ class ProcessImport implements ShouldQueue
             $str = str_replace('""', '"', $str);
         }
         
-        // 尝试转换编码
-        if (!mb_check_encoding($str, 'UTF-8')) {
-            $encodings = ['GB2312', 'GBK', 'GB18030', 'ISO-8859-1', 'Windows-1252'];
+        // 检测当前编码
+        $detectedEncoding = mb_detect_encoding($str, ['UTF-8', 'GBK', 'GB2312', 'CP936', 'GB18030'], true);
+        
+        // 转换编码 - 优先处理中文Windows编码
+        if ($detectedEncoding && $detectedEncoding !== 'UTF-8') {
+            Log::debug('检测到非UTF-8编码', [
+                'original' => $str, 
+                'detected_encoding' => $detectedEncoding,
+                'hex' => bin2hex($str)
+            ]);
             
-            foreach ($encodings as $encoding) {
-                if (mb_check_encoding($str, $encoding)) {
-                    return mb_convert_encoding($str, 'UTF-8', $encoding);
+            // 明确指定CP936/GBK/GB2312转UTF-8，避免自动检测错误
+            if (in_array($detectedEncoding, ['CP936', 'GBK', 'GB2312', 'GB18030'])) {
+                $converted = mb_convert_encoding($str, 'UTF-8', $detectedEncoding);
+                
+                // 记录转换结果
+                Log::debug('中文编码转换', [
+                    'from' => $detectedEncoding,
+                    'to' => 'UTF-8',
+                    'before_hex' => bin2hex($str),
+                    'after_hex' => bin2hex($converted)
+                ]);
+                
+                return $converted;
+            }
+            
+            // 其他编码使用自动检测
+            return mb_convert_encoding($str, 'UTF-8', $detectedEncoding);
+        }
+        
+        // 如果检测不到编码但不是UTF-8，尝试通用转换
+        if (!mb_check_encoding($str, 'UTF-8')) {
+            // 按可能性顺序尝试编码
+            $possibleEncodings = ['CP936', 'GBK', 'GB2312', 'GB18030', 'ISO-8859-1', 'Windows-1252'];
+            
+            foreach ($possibleEncodings as $encoding) {
+                $converted = mb_convert_encoding($str, 'UTF-8', $encoding);
+                // 如果转换后变成了有效的UTF-8，则使用该结果
+                if (mb_check_encoding($converted, 'UTF-8') && $converted !== $str) {
+                    return $converted;
                 }
             }
             
-            // 如果无法确定编码，强制转换为UTF-8
+            // 最后尝试自动检测
             return mb_convert_encoding($str, 'UTF-8', 'auto');
         }
         

@@ -427,18 +427,18 @@ class DashboardController extends Controller
                 $summaryData['expense'] = $totalExpense;
                 
                 // 重新计算衍生指标
-                if ($summaryData['registrations'] > 0) {
-                    $summaryData['conversion_rate'] = round(($summaryData['paying_users'] / $summaryData['registrations']) * 100, 2);
-                    $summaryData['arpu'] = round($summaryData['balance'] / $summaryData['registrations'], 2);
-                    $summaryData['cpa'] = round($summaryData['expense'] / $summaryData['registrations'], 2);
+            if ($summaryData['registrations'] > 0) {
+                $summaryData['conversion_rate'] = round(($summaryData['paying_users'] / $summaryData['registrations']) * 100, 2);
+                $summaryData['arpu'] = round($summaryData['balance'] / $summaryData['registrations'], 2);
+                $summaryData['cpa'] = round($summaryData['expense'] / $summaryData['registrations'], 2);
                     
                     // 添加计算公式详情
                     $summaryData['formula_details']['cpa'] = "消耗 / 新增用户数 = {$summaryData['expense']} / {$summaryData['registrations']} = {$summaryData['cpa']}";
                     $summaryData['formula_details']['conversion_rate'] = "首充人数 / 新增用户数 × 100% = {$summaryData['paying_users']} / {$summaryData['registrations']} × 100% = {$summaryData['conversion_rate']}%";
-                }
-                
-                if ($summaryData['paying_users'] > 0) {
-                    $summaryData['first_deposit_price'] = round($summaryData['expense'] / $summaryData['paying_users'], 2);
+            }
+            
+            if ($summaryData['paying_users'] > 0) {
+                $summaryData['first_deposit_price'] = round($summaryData['expense'] / $summaryData['paying_users'], 2);
                     
                     // 添加计算公式详情
                     $summaryData['formula_details']['first_deposit_price'] = "消耗 / 首充人数 = {$summaryData['expense']} / {$summaryData['paying_users']} = {$summaryData['first_deposit_price']}";
