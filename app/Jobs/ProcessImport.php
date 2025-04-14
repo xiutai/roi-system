@@ -388,32 +388,32 @@ class ProcessImport implements ShouldQueue
                                         'source' => $registrationSource,
                                         'channel_id' => $channels[$registrationSource]
                                     ]);
-                                    continue;
                                 }
-                                
-                                // 先按名称查找是否已存在该渠道
-                                $existingChannel = Channel::where('name', $registrationSource)->first();
-                                
-                                if ($existingChannel) {
-                                    // 如果已存在，直接使用
-                                    $channels[$registrationSource] = $existingChannel->id;
-                                    Log::info('找到已存在的渠道', [
-                                        'source' => $registrationSource,
-                                        'channel_id' => $existingChannel->id
-                                    ]);
-                                } else {
-                                    // 创建新渠道，使用转换后的名称
-                                    $channel = new Channel();
-                                    $channel->name = $registrationSource;
-                                    $channel->description = '从导入数据自动创建';
-                                    $channel->save();
+                                else {
+                                    // 先按名称查找是否已存在该渠道
+                                    $existingChannel = Channel::where('name', $registrationSource)->first();
                                     
-                                    $channels[$registrationSource] = $channel->id;
-                                    
-                                    Log::info('渠道创建成功', [
-                                        'source' => $registrationSource,
-                                        'channel_id' => $channel->id
-                                    ]);
+                                    if ($existingChannel) {
+                                        // 如果已存在，直接使用
+                                        $channels[$registrationSource] = $existingChannel->id;
+                                        Log::info('找到已存在的渠道', [
+                                            'source' => $registrationSource,
+                                            'channel_id' => $existingChannel->id
+                                        ]);
+                                    } else {
+                                        // 创建新渠道，使用转换后的名称
+                                        $channel = new Channel();
+                                        $channel->name = $registrationSource;
+                                        $channel->description = '从导入数据自动创建';
+                                        $channel->save();
+                                        
+                                        $channels[$registrationSource] = $channel->id;
+                                        
+                                        Log::info('渠道创建成功', [
+                                            'source' => $registrationSource,
+                                            'channel_id' => $channel->id
+                                        ]);
+                                    }
                                 }
                             } catch (\Exception $e) {
                                 // 记录详细错误信息
@@ -843,32 +843,32 @@ class ProcessImport implements ShouldQueue
                                     'source' => $registrationSource,
                                     'channel_id' => $channels[$registrationSource]
                                 ]);
-                                continue;
                             }
-                            
-                            // 先按名称查找是否已存在该渠道
-                            $existingChannel = Channel::where('name', $registrationSource)->first();
-                            
-                            if ($existingChannel) {
-                                // 如果已存在，直接使用
-                                $channels[$registrationSource] = $existingChannel->id;
-                                Log::info('找到已存在的渠道', [
-                                    'source' => $registrationSource,
-                                    'channel_id' => $existingChannel->id
-                                ]);
-                            } else {
-                                // 创建新渠道，使用转换后的名称
-                                $channel = new Channel();
-                                $channel->name = $registrationSource;
-                                $channel->description = '从导入数据自动创建';
-                                $channel->save();
+                            else {
+                                // 先按名称查找是否已存在该渠道
+                                $existingChannel = Channel::where('name', $registrationSource)->first();
                                 
-                                $channels[$registrationSource] = $channel->id;
-                                
-                                Log::info('渠道创建成功', [
-                                    'source' => $registrationSource,
-                                    'channel_id' => $channel->id
-                                ]);
+                                if ($existingChannel) {
+                                    // 如果已存在，直接使用
+                                    $channels[$registrationSource] = $existingChannel->id;
+                                    Log::info('找到已存在的渠道', [
+                                        'source' => $registrationSource,
+                                        'channel_id' => $existingChannel->id
+                                    ]);
+                                } else {
+                                    // 创建新渠道，使用转换后的名称
+                                    $channel = new Channel();
+                                    $channel->name = $registrationSource;
+                                    $channel->description = '从导入数据自动创建';
+                                    $channel->save();
+                                    
+                                    $channels[$registrationSource] = $channel->id;
+                                    
+                                    Log::info('渠道创建成功', [
+                                        'source' => $registrationSource,
+                                        'channel_id' => $channel->id
+                                    ]);
+                                }
                             }
                         } catch (\Exception $e) {
                             // 记录详细错误信息
@@ -970,25 +970,36 @@ class ProcessImport implements ShouldQueue
             
             // 插入剩余记录
             if (!empty($allRecords)) {
-                $insertedCount += $this->batchInsertRecords($allRecords);
-                $insertedRows += count($allRecords);
+                $batchResult = $this->batchInsertRecords($allRecords);
+                $insertedRows += $batchResult;
             }
             
             // 关闭文件
             fclose($file);
             
+            // 获取更新和新增的记录数
+            $updatedRows = DB::table('transactions')
+                ->where('insert_date', $this->importJob->insert_date)
+                ->where('updated_at', '>', $this->importJob->started_at)
+                ->count();
+            
+            $newRows = $insertedRows - $updatedRows;
+            if ($newRows < 0) $newRows = 0;
+            
             // 更新导入任务状态
             $this->importJob->update([
                 'status' => 'completed',
                 'processed_rows' => $rowCount,
-                'inserted_rows' => $insertedRows,
+                'inserted_rows' => $newRows,
+                'updated_rows' => $updatedRows,
                 'error_rows' => $rowCount - $insertedRows - $skippedCount,
                 'completed_at' => now()
             ]);
             
             Log::info('CSV导入完成', [
                 'total_rows' => $rowCount,
-                'inserted_rows' => $insertedRows,
+                'inserted_rows' => $newRows,
+                'updated_rows' => $updatedRows,
                 'skipped_rows' => $skippedCount,
                 'time_taken' => round(microtime(true) - $startTime, 2) . 's'
             ]);
@@ -1012,23 +1023,78 @@ class ProcessImport implements ShouldQueue
     }
     
     /**
-     * 批量插入记录
+     * 批量插入记录 - 修改为UPSERT逻辑
+     * 如果insert_date和member_id组合已存在，则更新记录
+     * 如果不存在，则插入新记录
      */
     protected function batchInsertRecords($records)
     {
+        if (empty($records)) {
+            return 0;
+        }
+
         try {
             DB::beginTransaction();
-            DB::table('transactions')->insert($records);
+            
+            $insertCount = 0;
+            $updateCount = 0;
+            
+            // 分批处理，以减轻数据库负担
+            $batches = array_chunk($records, 300);
+            
+            foreach ($batches as $batch) {
+                foreach ($batch as $record) {
+                    // 检查记录是否已存在
+                    $exists = DB::table('transactions')
+                        ->where('insert_date', $record['insert_date'])
+                        ->where('member_id', $record['member_id'])
+                        ->exists();
+                    
+                    if ($exists) {
+                        // 更新现有记录
+                        DB::table('transactions')
+                            ->where('insert_date', $record['insert_date'])
+                            ->where('member_id', $record['member_id'])
+                            ->update([
+                                'currency' => $record['currency'],
+                                'member_account' => $record['member_account'],
+                                'channel_id' => $record['channel_id'],
+                                'registration_source' => $record['registration_source'],
+                                'registration_time' => $record['registration_time'],
+                                'balance_difference' => $record['balance_difference'],
+                                'updated_at' => now()
+                            ]);
+                        $updateCount++;
+                    } else {
+                        // 插入新记录
+                        DB::table('transactions')->insert($record);
+                        $insertCount++;
+                    }
+                }
+            }
+            
             DB::commit();
-            return count($records);
-                    } catch (\Exception $e) {
+            
+            // 记录插入和更新的数量
+            if ($updateCount > 0) {
+                Log::info('记录批量更新和插入', [
+                    'inserted' => $insertCount,
+                    'updated' => $updateCount,
+                    'total' => $insertCount + $updateCount
+                ]);
+            }
+            
+            return $insertCount + $updateCount;
+        } catch (\Exception $e) {
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
-            Log::error('批量插入记录失败', [
+            
+            Log::error('批量插入/更新记录失败', [
                 'error' => $e->getMessage(),
                 'count' => count($records)
             ]);
+            
             return 0;
         }
     }

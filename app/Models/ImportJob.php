@@ -16,22 +16,22 @@ class ImportJob extends Model
      * @var array
      */
     protected $fillable = [
+        'user_id',
         'filename',
         'original_filename',
+        'file_path',
         'status',
+        'insert_date',
         'total_rows',
         'processed_rows',
         'inserted_rows',
         'updated_rows',
         'error_rows',
         'replaced_rows',
-        'error_message',
-        'error_details',
-        'user_id',
-        'insert_date',
-        'is_replacing_existing',
         'started_at',
         'completed_at',
+        'error_message',
+        'is_replacing_existing'
     ];
 
     /**
