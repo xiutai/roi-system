@@ -1036,55 +1036,98 @@ class ProcessImport implements ShouldQueue
         try {
             DB::beginTransaction();
             
-            $insertCount = 0;
-            $updateCount = 0;
+            $insertedCount = 0;
+            $updatedCount = 0;
+            $batchSize = 300;
             
-            // 分批处理，以减轻数据库负担
-            $batches = array_chunk($records, 300);
+            // 使用集合处理数据
+            $recordsToInsert = [];
+            $recordsToUpdate = [];
             
-            foreach ($batches as $batch) {
-                foreach ($batch as $record) {
-                    // 检查记录是否已存在
-                    $exists = DB::table('transactions')
-                        ->where('insert_date', $record['insert_date'])
-                        ->where('member_id', $record['member_id'])
-                        ->exists();
-                    
-                    if ($exists) {
-                        // 更新现有记录
-                        DB::table('transactions')
-                            ->where('insert_date', $record['insert_date'])
-                            ->where('member_id', $record['member_id'])
-                            ->update([
-                                'currency' => $record['currency'],
-                                'member_account' => $record['member_account'],
-                                'channel_id' => $record['channel_id'],
-                                'registration_source' => $record['registration_source'],
-                                'registration_time' => $record['registration_time'],
-                                'balance_difference' => $record['balance_difference'],
-                                'updated_at' => now()
-                            ]);
-                        $updateCount++;
+            // 获取所有记录的member_id和insert_date组合，用于一次性查询存在的记录
+            $memberDatePairs = [];
+            foreach ($records as $record) {
+                $memberDatePairs[] = [
+                    'member_id' => $record['member_id'],
+                    'insert_date' => $record['insert_date']
+                ];
+            }
+            
+            // 分批查询，减少内存使用
+            $existingRecords = [];
+            foreach (array_chunk($memberDatePairs, $batchSize) as $batch) {
+                $query = DB::table('transactions')->select('member_id', 'insert_date');
+                
+                // 构建WHERE条件
+                foreach ($batch as $i => $pair) {
+                    if ($i === 0) {
+                        $query->where(function($q) use ($pair) {
+                            $q->where('member_id', $pair['member_id'])
+                              ->where('insert_date', $pair['insert_date']);
+                        });
                     } else {
-                        // 插入新记录
-                        DB::table('transactions')->insert($record);
-                        $insertCount++;
+                        $query->orWhere(function($q) use ($pair) {
+                            $q->where('member_id', $pair['member_id'])
+                              ->where('insert_date', $pair['insert_date']);
+                        });
                     }
+                }
+                
+                // 执行查询并合并结果
+                $results = $query->get();
+                foreach ($results as $result) {
+                    $existingRecords[$result->member_id . '_' . $result->insert_date] = true;
                 }
             }
             
+            // 分拣数据，更新或插入
+            foreach ($records as $record) {
+                $key = $record['member_id'] . '_' . $record['insert_date'];
+                if (isset($existingRecords[$key])) {
+                    $recordsToUpdate[] = $record;
+                } else {
+                    $recordsToInsert[] = $record;
+                }
+            }
+            
+            // 批量插入新记录
+            if (!empty($recordsToInsert)) {
+                foreach (array_chunk($recordsToInsert, $batchSize) as $batch) {
+                    DB::table('transactions')->insert($batch);
+                }
+                $insertedCount = count($recordsToInsert);
+            }
+            
+            // 批量更新现有记录
+            if (!empty($recordsToUpdate)) {
+                foreach ($recordsToUpdate as $record) {
+                    DB::table('transactions')
+                        ->where('member_id', $record['member_id'])
+                        ->where('insert_date', $record['insert_date'])
+                        ->update([
+                            'currency' => $record['currency'],
+                            'member_account' => $record['member_account'],
+                            'channel_id' => $record['channel_id'],
+                            'registration_source' => $record['registration_source'],
+                            'registration_time' => $record['registration_time'],
+                            'balance_difference' => $record['balance_difference'],
+                            'updated_at' => now()
+                        ]);
+                }
+                $updatedCount = count($recordsToUpdate);
+            }
+            
+            // 提交事务
             DB::commit();
             
             // 记录插入和更新的数量
-            if ($updateCount > 0) {
-                Log::info('记录批量更新和插入', [
-                    'inserted' => $insertCount,
-                    'updated' => $updateCount,
-                    'total' => $insertCount + $updateCount
-                ]);
-            }
+            Log::info('记录批量处理完成', [
+                'inserted' => $insertedCount,
+                'updated' => $updatedCount,
+                'total' => $insertedCount + $updatedCount
+            ]);
             
-            return $insertCount + $updateCount;
+            return $insertedCount + $updatedCount;
         } catch (\Exception $e) {
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
@@ -1092,10 +1135,11 @@ class ProcessImport implements ShouldQueue
             
             Log::error('批量插入/更新记录失败', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
                 'count' => count($records)
             ]);
             
-            return 0;
+            throw $e;
         }
     }
 

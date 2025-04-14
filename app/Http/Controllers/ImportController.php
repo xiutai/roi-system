@@ -292,8 +292,6 @@ class ImportController extends Controller
             $importJob = ImportJob::create([
                 'filename' => $filename,
                 'original_filename' => $originalFilename,
-                'file_path' => 'imports/' . $filename,
-                'file_type' => strtolower($extension),
                 'status' => 'pending',
                 'user_id' => Auth::id(),
                 'insert_date' => $insertDate,
