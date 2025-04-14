@@ -695,8 +695,6 @@ class DashboardController extends Controller
         } catch (\Exception $e) {
             // 记录错误并显示错误页面
             Log::error('仪表盘加载失败: ' . $e->getMessage());
-            Log::error('错误位置: ' . $e->getFile() . ' (第 ' . $e->getLine() . ' 行)');
-            Log::error('错误堆栈: ' . $e->getTraceAsString());
             
             return view('error', [
                 'message' => '加载仪表盘时出错。请检查数据库是否正确配置，并确保所有表和列都已正确创建。',

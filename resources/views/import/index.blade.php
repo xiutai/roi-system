@@ -332,35 +332,25 @@
                                 refreshButton.className = 'btn btn-outline-primary ms-2';
                                 refreshButton.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 刷新状态';
                                 refreshButton.addEventListener('click', function() {
-                                    window.location.reload();
+                                    window.location.href = "{{ route('import.index') }}";
                                 });
                                 
                                 // 将刷新按钮添加到表单后面
                                 importBtn.parentNode.appendChild(refreshButton);
                                 
-                                // 设置定时刷新（10秒后刷新页面）
-                                setTimeout(function() {
-                                    window.location.reload();
-                                }, 10000);
-                                
-                                // 创建一个轮询任务来检查任务状态
-                                let checkCount = 0;
-                                const maxChecks = 5;
-                                
-                                function checkJobStatus() {
-                                    if (checkCount >= maxChecks) return;
-                                    
-                                    checkCount++;
-                                    statusText.textContent = `文件已上传，正在后台处理中...(${checkCount}/${maxChecks})`;
-                                    
-                                    // 再次检查，直到达到最大检查次数
-                                    setTimeout(checkJobStatus, 2000);
+                                // 立即跳转到导入详情页面（如果有job_id）
+                                if (response.job_id) {
+                                    setTimeout(function() {
+                                        window.location.href = "{{ url('import') }}/" + response.job_id;
+                                    }, 1000);
+                                } else {
+                                    // 如果没有job_id，则刷新当前页面
+                                    setTimeout(function() {
+                                        window.location.href = "{{ route('import.index') }}";
+                                    }, 3000);
                                 }
-                                
-                                // 开始轮询
-                                setTimeout(checkJobStatus, 2000);
                             } else {
-                                handleError(response.error || '上传失败，请重试');
+                                handleError(response.message || '上传失败，请重试');
                             }
                         } catch (e) {
                             handleError('解析响应失败: ' + e.message);

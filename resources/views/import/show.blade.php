@@ -229,88 +229,48 @@
         // 只有在任务正在处理或等待中时才自动刷新
         @if($importJob->isPending() || $importJob->isProcessing())
         function updateProgress() {
-            fetch('{{ route('import.progress', $importJob->id) }}')
-                .then(response => response.json())
-                .then(data => {
-                    // 更新进度条
-                    const progressBar = document.querySelector('.progress-bar');
-                    progressBar.style.width = data.progress_percentage + '%';
-                    progressBar.setAttribute('aria-valuenow', data.progress_percentage);
-                    progressBar.textContent = data.progress_percentage + '%';
-                    
-                    // 更新统计数据
-                    document.getElementById('processed-rows').textContent = data.processed_rows;
-                    document.getElementById('total-rows').textContent = data.total_rows || '未知';
-                    document.getElementById('inserted-rows').textContent = data.inserted_rows;
-                    document.getElementById('updated-rows').textContent = data.updated_rows;
-                    document.getElementById('error-rows').textContent = data.error_rows;
-                    
-                    // 更新错误详情（如果有）
-                    if (data.error_details && data.error_details.length > 0) {
-                        // 检查错误详情区域是否已存在
-                        let errorDetailsCard = document.querySelector('.card.border-danger');
-                        
-                        if (!errorDetailsCard) {
-                            // 创建错误详情卡片
-                            const errorCardHtml = `
-                                <div class="card mb-3 border-danger">
-                                    <div class="card-header bg-danger text-white">
-                                        <h6 class="mb-0">错误详情（${data.error_details.length}条）</h6>
-                                    </div>
-                                    <div class="card-body p-0">
-                                        <div class="table-responsive">
-                                            <table class="table table-sm table-striped mb-0">
-                                                <thead>
-                                                    <tr>
-                                                        <th width="10%">序号</th>
-                                                        <th width="90%">错误描述</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody id="error-details-tbody" style="max-height: 300px; overflow-y: auto;">
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                            
-                            // 插入错误详情卡片到适当位置
-                            const insertPosition = document.querySelector('.alert') || document.getElementById('import-stats').closest('.col-md-6');
-                            insertPosition.insertAdjacentHTML('afterend', errorCardHtml);
-                            errorDetailsCard = document.querySelector('.card.border-danger');
-                        }
-                        
-                        // 更新错误详情表格内容
-                        const tbody = document.getElementById('error-details-tbody') || errorDetailsCard.querySelector('tbody');
-                        tbody.innerHTML = ''; // 清空现有内容
-                        
-                        data.error_details.forEach((error, index) => {
-                            const row = document.createElement('tr');
-                            row.innerHTML = `<td>${index + 1}</td><td>${error}</td>`;
-                            tbody.appendChild(row);
-                        });
-                        
-                        // 更新标题中的错误数量
-                        const heading = errorDetailsCard.querySelector('.card-header h6');
-                        heading.textContent = `错误详情（${data.error_details.length}条）`;
-                        
-                        // 显示错误详情卡片
-                        errorDetailsCard.style.display = 'block';
-                    }
-                    
-                    // 如果任务状态改变，刷新页面
-                    if (data.status !== '{{ $importJob->status }}') {
+            fetch('{{ route('import.progress', $importJob->id) }}', {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                },
+                credentials: 'same-origin'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('网络错误，状态码: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 更新进度条
+                const progressBar = document.querySelector('.progress-bar');
+                progressBar.style.width = data.progress_percentage + '%';
+                progressBar.setAttribute('aria-valuenow', data.progress_percentage);
+                progressBar.textContent = data.progress_percentage + '%';
+                
+                // 更新统计数据
+                document.getElementById('processed-rows').textContent = data.processed_rows;
+                document.getElementById('total-rows').textContent = data.total_rows || '未知';
+                document.getElementById('inserted-rows').textContent = data.inserted_rows;
+                document.getElementById('updated-rows').textContent = data.updated_rows;
+                document.getElementById('error-rows').textContent = data.error_rows;
+                
+                // 如果任务完成或失败，刷新整个页面
+                if (data.status === 'completed' || data.status === 'failed') {
+                    setTimeout(function() {
                         window.location.reload();
-                        return;
-                    }
-                    
-                    // 继续轮询
-                    setTimeout(updateProgress, 1000); // 每1秒更新一次
-                })
-                .catch(error => {
-                    console.error('更新进度失败:', error);
-                    setTimeout(updateProgress, 2000); // 失败后2秒再尝试
-                });
+                    }, 1000);
+                } else {
+                    // 否则继续轮询
+                    setTimeout(updateProgress, 2000);
+                }
+            })
+            .catch(error => {
+                console.error('更新进度失败:', error);
+                // 错误后依然尝试继续更新，降低频率
+                setTimeout(updateProgress, 5000);
+            });
         }
         
         // 开始轮询
