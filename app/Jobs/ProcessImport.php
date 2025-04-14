@@ -361,12 +361,42 @@ class ProcessImport implements ShouldQueue
                         
                         // 获取或创建渠道
                         if (!isset($channels[$registrationSource])) {
-                            // 创建新渠道
-                            $channel = Channel::firstOrCreate(
-                                ['name' => $registrationSource],
-                                ['description' => '从导入数据自动创建']
-                            );
-                            $channels[$registrationSource] = $channel->id;
+                            // 确保渠道名称使用正确的编码
+                            $channelName = $this->ensureCorrectEncoding($registrationSource);
+                            
+                            // 额外的编码检查 - 针对中文字符特别处理
+                            if (preg_match('/[\x{4e00}-\x{9fa5}]/u', $channelName)) {
+                                // 确保是有效的UTF-8字符串
+                                if (!mb_check_encoding($channelName, 'UTF-8')) {
+                                    $channelName = mb_convert_encoding($channelName, 'UTF-8', ['GBK', 'GB2312', 'GB18030', 'auto']);
+                                }
+                                
+                                // 记录渠道创建前的字符编码情况
+                                Log::info('创建中文渠道', [
+                                    'name' => $channelName,
+                                    'encoded' => bin2hex($channelName),
+                                    'length' => mb_strlen($channelName, 'UTF-8')
+                                ]);
+                            }
+                            
+                            try {
+                                // 创建新渠道
+                                $channel = Channel::firstOrCreate(
+                                    ['name' => $channelName],
+                                    ['description' => '从导入数据自动创建']
+                                );
+                                $channels[$registrationSource] = $channel->id;
+                            } catch (\Exception $e) {
+                                // 如果创建失败，记录错误并使用默认渠道
+                                Log::error('创建渠道失败，使用默认渠道', [
+                                    'source' => $registrationSource,
+                                    'encoded_name' => bin2hex($channelName),
+                                    'error' => $e->getMessage()
+                                ]);
+                                
+                                // 使用ID为1的默认渠道
+                                $channels[$registrationSource] = 1;
+                            }
                         }
                         
                         $channelId = $channels[$registrationSource];
