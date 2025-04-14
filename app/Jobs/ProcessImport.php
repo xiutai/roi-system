@@ -361,41 +361,42 @@ class ProcessImport implements ShouldQueue
                         
                         // 获取或创建渠道
                         if (!isset($channels[$registrationSource])) {
-                            // 确保渠道名称使用正确的编码
-                            $channelName = $this->ensureCorrectEncoding($registrationSource);
-                            
-                            // 额外的编码检查 - 针对中文字符特别处理
-                            if (preg_match('/[\x{4e00}-\x{9fa5}]/u', $channelName)) {
-                                // 确保是有效的UTF-8字符串
-                                if (!mb_check_encoding($channelName, 'UTF-8')) {
-                                    $channelName = mb_convert_encoding($channelName, 'UTF-8', ['GBK', 'GB2312', 'GB18030', 'auto']);
-                                }
-                                
-                                // 记录渠道创建前的字符编码情况
-                                Log::info('创建中文渠道', [
-                                    'name' => $channelName,
-                                    'encoded' => bin2hex($channelName),
-                                    'length' => mb_strlen($channelName, 'UTF-8')
-                                ]);
-                            }
-                            
                             try {
+                                // 记录创建渠道前的详细信息
+                                Log::info('尝试创建新渠道', [
+                                    'source' => $registrationSource,
+                                    'binary_representation' => bin2hex($registrationSource),
+                                    'current_charset' => mb_detect_encoding($registrationSource, ['UTF-8', 'GBK', 'GB2312', 'ASCII'], true),
+                                    'length' => mb_strlen($registrationSource),
+                                    'row' => $processedRows
+                                ]);
+                                
                                 // 创建新渠道
                                 $channel = Channel::firstOrCreate(
-                                    ['name' => $channelName],
+                                    ['name' => $registrationSource],
                                     ['description' => '从导入数据自动创建']
                                 );
                                 $channels[$registrationSource] = $channel->id;
-                            } catch (\Exception $e) {
-                                // 如果创建失败，记录错误并使用默认渠道
-                                Log::error('创建渠道失败，使用默认渠道', [
+                                
+                                // 记录创建成功
+                                Log::info('渠道创建成功', [
+                                    'name' => $registrationSource,
+                                    'id' => $channel->id
+                                ]);
+                            } catch (\Exception $channelError) {
+                                // 提供更详细的错误信息
+                                Log::error('渠道创建失败', [
                                     'source' => $registrationSource,
-                                    'encoded_name' => bin2hex($channelName),
-                                    'error' => $e->getMessage()
+                                    'binary_representation' => bin2hex($registrationSource),
+                                    'error' => $channelError->getMessage(),
+                                    'error_code' => $channelError->getCode(),
+                                    'error_file' => $channelError->getFile(),
+                                    'error_line' => $channelError->getLine(),
+                                    'row' => $processedRows
                                 ]);
                                 
-                                // 使用ID为1的默认渠道
-                                $channels[$registrationSource] = 1;
+                                // 继续抛出异常，让外层捕获
+                                throw $channelError;
                             }
                         }
                         
@@ -765,12 +766,43 @@ class ProcessImport implements ShouldQueue
                     
                     // 获取或创建渠道
                     if (!isset($channels[$registrationSource])) {
-                        // 创建新渠道
-                        $channel = Channel::firstOrCreate(
-                            ['name' => $registrationSource],
-                            ['description' => '从导入数据自动创建']
-                        );
-                        $channels[$registrationSource] = $channel->id;
+                        try {
+                            // 记录创建渠道前的详细信息
+                            Log::info('尝试创建新渠道', [
+                                'source' => $registrationSource,
+                                'binary_representation' => bin2hex($registrationSource),
+                                'current_charset' => mb_detect_encoding($registrationSource, ['UTF-8', 'GBK', 'GB2312', 'ASCII'], true),
+                                'length' => mb_strlen($registrationSource),
+                                'row' => $rowCount
+                            ]);
+                            
+                            // 创建新渠道
+                            $channel = Channel::firstOrCreate(
+                                ['name' => $registrationSource],
+                                ['description' => '从导入数据自动创建']
+                            );
+                            $channels[$registrationSource] = $channel->id;
+                            
+                            // 记录创建成功
+                            Log::info('渠道创建成功', [
+                                'name' => $registrationSource,
+                                'id' => $channel->id
+                            ]);
+                        } catch (\Exception $channelError) {
+                            // 提供更详细的错误信息
+                            Log::error('渠道创建失败', [
+                                'source' => $registrationSource,
+                                'binary_representation' => bin2hex($registrationSource),
+                                'error' => $channelError->getMessage(),
+                                'error_code' => $channelError->getCode(),
+                                'error_file' => $channelError->getFile(),
+                                'error_line' => $channelError->getLine(),
+                                'row' => $rowCount
+                            ]);
+                            
+                            // 继续抛出异常，让外层捕获
+                            throw $channelError;
+                        }
                     }
                     
                     $channelId = $channels[$registrationSource];
@@ -806,10 +838,25 @@ class ProcessImport implements ShouldQueue
                     
                 } catch (\Exception $e) {
                     $errorCount++;
+                    // 增强错误日志
                     Log::error('处理行数据失败', [
                         'row' => $rowCount,
-                        'error' => $e->getMessage()
+                        'error' => $e->getMessage(),
+                        'error_code' => $e->getCode(),
+                        'error_file' => $e->getFile(),
+                        'error_line' => $e->getLine(),
+                        'error_trace' => array_slice($e->getTrace(), 0, 3)  // 只记录前3个堆栈信息，避免日志过大
                     ]);
+                    
+                    // 如果是渠道创建错误，记录额外信息
+                    if (stripos($e->getMessage(), 'channels') !== false) {
+                        Log::error('疑似编码问题导致渠道创建失败', [
+                            'row' => $rowCount,
+                            'source' => $registrationSource ?? '未知',
+                            'mysql_charset' => DB::select('SHOW VARIABLES LIKE "character_set%"'),
+                            'php_charset' => mb_list_encodings()
+                        ]);
+                    }
                 }
                 
                 // 减少进度日志频率，每50000行记录一次
