@@ -81,7 +81,7 @@ class ProcessImport implements ShouldQueue
         // 从数据库加载导入任务
         $this->importJob = ImportJob::findOrFail($this->importJobId);
         
-        // 保留关键日志，删除冗余日志
+        // 保留关键日志
         Log::info('开始处理导入任务', [
             'job_id' => $this->importJob->id,
             'filename' => $this->importJob->original_filename
@@ -118,480 +118,39 @@ class ProcessImport implements ShouldQueue
             // 获取文件扩展名
             $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
             
+            // 验证文件格式
+            if (!in_array($extension, ['csv', 'txt'])) {
+                throw new \Exception("不支持的文件格式: {$extension}，只支持CSV或TXT格式");
+            }
+            
             // 计算文件大小
             $fileSize = filesize($filePath);
             if ($fileSize === false) {
                 throw new \Exception("无法获取文件大小: {$filePath}");
             }
             
-            $fileSizeMB = round($fileSize / 1024 / 1024, 2);
-            
             // 计算总行数
             $totalRows = $this->countFileRows($filePath, $extension);
             $this->importJob->update(['total_rows' => $totalRows]);
             
-            // 处理文件
-            if (in_array($extension, ['csv', 'txt'])) {
-                // 直接处理CSV，更高效
-                $this->processCsvFile($filePath);
-            } else {
-                // 使用Excel包处理
-                DB::disableQueryLog(); // 禁用查询日志以减少内存使用
-                
-                try {
-                    // 设置自定义临时目录
-                    $tempDir = storage_path('app/temp/' . uniqid('excel_'));
-                    if (!file_exists($tempDir)) {
-                        mkdir($tempDir, 0755, true);
-                    }
-                    // 通过PHP环境变量设置临时目录
-                    putenv("TMPDIR={$tempDir}");
-                    
-                    // 绕过Maatwebsite\Excel的Storage Facade依赖，直接使用文件路径
-                    $reader = IOFactory::createReaderForFile($filePath);
-                    $reader->setReadDataOnly(true);
-                    $spreadsheet = $reader->load($filePath);
-                    
-                    // 获取活动工作表
-                    $worksheet = $spreadsheet->getActiveSheet();
-                    $highestRow = $worksheet->getHighestRow();
-                    
-                    // 获取列标题
-                    $headers = [];
-                    $encodedHeaders = [];
-                    $highestColumn = $worksheet->getHighestColumn();
-                    $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
-                    
-                    Log::info('Excel表格信息', [
-                        'highest_column' => $highestColumn,
-                        'highest_column_index' => $highestColumnIndex,
-                        'highest_row' => $highestRow
-                    ]);
-                    
-                    // 原始表头数据收集
-                    $rawHeaders = [];
-                    for ($col = 1; $col <= $highestColumnIndex; $col++) {
-                        $cell = $worksheet->getCellByColumnAndRow($col, 1);
-                        $rawValue = $cell->getValue();
-                        $rawHeaders[$col] = [
-                            'raw_value' => $rawValue,
-                            'data_type' => $cell->getDataType(),
-                            'formatted' => $cell->getFormattedValue()
-                        ];
-                    }
-                    Log::info('Excel原始表头详情', ['raw_headers' => $rawHeaders]);
-                    
-                    // 获取表头值，处理公式和特殊格式
-                    for ($col = 1; $col <= $highestColumnIndex; $col++) {
-                        $cell = $worksheet->getCellByColumnAndRow($col, 1);
-                        $value = $cell->getValue();
-                        
-                        // 处理公式单元格
-                        if ($cell->getDataType() == \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_FORMULA) {
-                            try {
-                                $value = $cell->getCalculatedValue();
-                            } catch (\Exception $e) {
-                                $value = $cell->getFormattedValue();
-                            }
-                        }
-                        
-                        // 处理="xxx"格式
-                        if (is_string($value) && preg_match('/^="(.*)"$/', $value, $matches)) {
-                            $value = $matches[1];
-                        } elseif (is_string($value) && substr($value, 0, 1) === '=') {
-                            $value = substr($value, 1);
-                        }
-                        
-                        $encodedValue = $this->ensureCorrectEncoding($value);
-                        $headers[$col] = $encodedValue;
-                        $encodedHeaders[$col] = $encodedValue;
-                    }
-                    
-                    // 记录处理后的表头
-                    Log::info('Excel处理后的表头', ['headers' => $headers]);
-                    
-                    // 读取第一行数据进行检查
-                    if ($highestRow > 1) {
-                        $checkRow = [];
-                        for ($col = 1; $col <= $highestColumnIndex; $col++) {
-                            $cell = $worksheet->getCellByColumnAndRow($col, 2);
-                            $value = $cell->getValue();
-                            $dataType = $cell->getDataType();
-                            $checkRow[$col] = [
-                                'value' => $value,
-                                'type' => $dataType
-                            ];
-                        }
-                        Log::info('Excel第二行数据', ['row' => $checkRow]);
-                    }
-                    
-                    // 检查必要字段是否存在
-                    $requiredFields = ['registration_source', 'registration_time'];
-                    $missingFields = [];
-                    
-                    foreach ($requiredFields as $field) {
-                        if (!in_array($field, $headers)) {
-                            $missingFields[] = $field;
-                        }
-                    }
-                    
-                    if (!empty($missingFields)) {
-                        Log::error('缺少必要字段', [
-                            'missing_fields' => $missingFields,
-                            'headers' => $headers,
-                            'required_fields' => $requiredFields
-                        ]);
-                        throw new \Exception("缺少必要字段: " . implode(", ", $missingFields));
-                    }
-                    
-                    // 开始处理数据
-                    $insertedRows = 0;
-                    $errorRows = 0;
-                    $errorDetails = [];
-                    
-                    // 预加载所有渠道到内存
-                    $channels = [];
-                    Channel::chunk(500, function ($channelChunk) use (&$channels) {
-                        foreach ($channelChunk as $channel) {
-                            $channels[$channel->name] = $channel->id;
-                        }
-                    });
-                    
-                    // 收集所有记录
-                    $allRecords = [];
-                    
-                    // 从第二行开始处理（跳过标题行）
-                    $processedRows = 0; // 初始化处理行数计数器
-                    for ($row = 2; $row <= $highestRow; $row++) {
-                        // 更新进度
-                        $processedRows++;
-                        if ($processedRows % 100 == 0) {
-                            $this->importJob->update(['processed_rows' => $processedRows]);
-                        }
-                        
-                        $rowData = [];
-                        for ($col = 1; $col <= $highestColumnIndex; $col++) {
-                                $cell = $worksheet->getCellByColumnAndRow($col, $row);
-                            
-                            // 获取单元格的值，处理公式单元格
-                            if ($cell->getDataType() == \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_FORMULA) {
-                                // 尝试获取公式计算结果
-                                try {
-                                    $value = $cell->getCalculatedValue();
-                                } catch (\Exception $e) {
-                                    // 如果计算公式值失败，则获取原始公式字符串并清理
-                                $value = $cell->getValue();
-                                    // 如果是="xxx"这种格式，提取出引号中的内容
-                                    if (preg_match('/^="(.*)"$/', $value, $matches)) {
-                                        $value = $matches[1];
-                                    } elseif (substr($value, 0, 1) == '=') {
-                                        // 如果以=开头但不是="xxx"格式，则去掉=号
-                                        $value = substr($value, 1);
-                                    }
-                                }
-                            } else {
-                                $value = $cell->getValue();
-                            }
-                            
-                            if (isset($headers[$col])) {
-                                $fieldName = $headers[$col];
-                                
-                                // 对日期字段特殊处理
-                                if ($fieldName == 'registration_time' && $value) {
-                                    $value = $this->transformDate($value);
-                                }
-                                
-                                $rowData[$fieldName] = $value;
-                            }
-                        }
-                        
-                        // 提取必要字段
-                        $memberId = trim($rowData['member_id'] ?? '');
-                        $registrationSource = trim($rowData['registration_source'] ?? '');
-                        $registrationTime = trim($rowData['registration_time'] ?? '');
-                        
-                        // 如果注册来源为空，设置为"无来源"
-                        if (empty($registrationSource)) {
-                            $registrationSource = '无来源';
-                            Log::info('注册来源为空，已设置为默认值', [
-                                'row' => $processedRows,
-                                'member_id' => $memberId,
-                                'default_source' => $registrationSource
-                            ]);
-                        }
-                        
-                        // 检查必要字段
-                        if (empty($registrationTime)) {
-                            Log::warning('缺少注册时间的行数据', [
-                                'row' => $processedRows,
-                                'data' => $rowData
-                            ]);
-                            continue;
-                        }
-                        
-                        // 数值字段验证和转换
-                        $balanceDifference = 0;
-                        $rawBalance = $rowData['balance_difference'] ?? '0';
-                        
-                        // 处理可能的数值格式问题
-                        $rawBalance = preg_replace('/[^\d.-]/', '', $rawBalance); // 只保留数字、小数点和负号
-                        
-                        if (is_numeric($rawBalance)) {
-                            $balanceDifference = (float)$rawBalance;
-                        } else {
-                            Log::warning('非数字的充提差额', [
-                                'row' => $processedRows,
-                                'value' => $rawBalance,
-                                'converted' => 0
-                            ]);
-                        }
-                        
-                        // 获取或创建渠道
-                        if (!isset($channels[$registrationSource])) {
-                            try {
-                                // 确保渠道名称使用正确的编码 - 加强转换方式
-                                $originalSource = $registrationSource;
-                                $encodedSource = $this->ensureCorrectEncoding($registrationSource);
-                                
-                                // 检查编码转换前后是否有变化
-                                $sourceChanged = ($encodedSource !== $originalSource);
-                                
-                                // 记录原始数据和编码转换结果
-                                Log::info('处理渠道编码', [
-                                    'original' => $originalSource,
-                                    'original_hex' => bin2hex($originalSource),
-                                    'converted' => $encodedSource,
-                                    'converted_hex' => bin2hex($encodedSource),
-                                    'encoding_changed' => $sourceChanged,
-                                    'row' => $processedRows
-                                ]);
-                                
-                                // 使用转换后的渠道名称
-                                $registrationSource = $encodedSource;
-                                
-                                // 再次检查已存在的渠道映射
-                                if (isset($channels[$registrationSource])) {
-                                    Log::info('编码转换后找到已存在的渠道', [
-                                        'source' => $registrationSource,
-                                        'channel_id' => $channels[$registrationSource]
-                                    ]);
-                                }
-                                else {
-                                    // 先按名称查找是否已存在该渠道
-                                    $existingChannel = Channel::where('name', $registrationSource)->first();
-                                    
-                                    if ($existingChannel) {
-                                        // 如果已存在，直接使用
-                                        $channels[$registrationSource] = $existingChannel->id;
-                                        Log::info('找到已存在的渠道', [
-                                            'source' => $registrationSource,
-                                            'channel_id' => $existingChannel->id
-                                        ]);
-                                    } else {
-                                        // 创建新渠道，使用转换后的名称
-                                        $channel = new Channel();
-                                        $channel->name = $registrationSource;
-                                        $channel->description = '从导入数据自动创建';
-                                        $channel->save();
-                                        
-                            $channels[$registrationSource] = $channel->id;
-                                        
-                                        Log::info('渠道创建成功', [
-                                            'source' => $registrationSource,
-                                            'channel_id' => $channel->id
-                                        ]);
-                                    }
-                                }
-                            } catch (\Exception $e) {
-                                // 记录详细错误信息
-                                Log::error('渠道创建异常', [
-                                    'source' => $registrationSource ?? 'unknown',
-                                    'hex' => isset($registrationSource) ? bin2hex($registrationSource) : '',
-                                    'error' => $e->getMessage(),
-                                    'error_code' => $e->getCode(),
-                                    'error_trace' => array_slice($e->getTrace(), 0, 3)
-                                ]);
-                                
-                                // 遇到错误时使用默认渠道
-                                $defaultChannelName = '默认渠道';
-                                if (!isset($channels[$defaultChannelName])) {
-                                    // 查找或创建默认渠道
-                                    $defaultChannel = Channel::firstOrCreate(
-                                        ['name' => $defaultChannelName],
-                                        ['description' => '导入数据默认渠道']
-                                    );
-                                    $channels[$defaultChannelName] = $defaultChannel->id;
-                                    
-                                    Log::info('创建默认渠道', [
-                                        'channel_id' => $defaultChannel->id
-                                    ]);
-                                }
-                                
-                                // 将错误的渠道映射到默认渠道
-                                $channels[$registrationSource] = $channels[$defaultChannelName];
-                                
-                                Log::info('使用默认渠道', [
-                                    'original_source' => $registrationSource,
-                                    'default_channel_id' => $channels[$defaultChannelName]
-                                ]);
-                            }
-                        }
-                        
-                        $channelId = $channels[$registrationSource];
-                        
-                        // 收集所有记录
-                        $allRecords[] = [
-                            'currency' => $rowData['currency'] ?? 'PKR',
-                            'member_id' => $memberId,
-                            'member_account' => $rowData['member_account'] ?? '',
-                            'channel_id' => $channelId,
-                            'registration_source' => $registrationSource,
-                            'registration_time' => $rowData['registration_time'],
-                            'balance_difference' => $balanceDifference,
-                            'insert_date' => $this->importJob->insert_date,
-                            'created_at' => now(),
-                            'updated_at' => now(),
-                        ];
-                    }
-                    
-                    // 如果需要替换现有数据（相同insert_date的数据）
-                    $replacedRows = 0;
-                    if ($this->importJob->is_replacing_existing) {
-                        Log::info('删除相同插入日期的数据', ['insert_date' => $this->importJob->insert_date]);
-                        $replacedRows = DB::table('transactions')
-                            ->where('insert_date', $this->importJob->insert_date)
-                            ->delete();
-                        Log::info('删除完成', ['replaced_rows' => $replacedRows]);
-                        
-                        // 更新导入任务的替换记录数
-                        $this->importJob->update([
-                            'replaced_rows' => $replacedRows
-                        ]);
-                    }
-                    
-                    // 批量插入数据
-                    if (!empty($allRecords)) {
-                        Log::info('开始插入Excel数据', ['count' => count($allRecords)]);
-                        
-                        // 使用更小的批次插入记录，每批次单独使用事务
-                        $batchSize = 3000;
-                        $batches = array_chunk($allRecords, $batchSize);
-                        $batchInserted = 0;
-                        
-                        foreach ($batches as $index => $batch) {
-                            try {
-                                DB::beginTransaction();
-                                
-                                DB::table('transactions')->insert($batch);
-                                $batchInserted += count($batch);
-                                
-                                DB::commit();
-                                
-                                // 每批次更新一次插入计数
-                                $this->importJob->update([
-                                    'inserted_rows' => $batchInserted
-                                ]);
-                                
-                                Log::info('批次插入完成', [
-                                    'batch' => $index + 1, 
-                                    'total_batches' => count($batches),
-                                    'inserted_so_far' => $batchInserted
-                                ]);
-                                
-                            } catch (\Exception $e) {
-                                if (DB::transactionLevel() > 0) {
-                                    DB::rollBack();
-                                }
-                                Log::error('批次插入失败', [
-                                    'batch' => $index + 1,
-                                    'error' => $e->getMessage()
-                                ]);
-                                // 继续处理下一批次，不中断整个流程
-                            }
-                        }
-                        
-                        $insertedRows = $batchInserted;
-                        Log::info('Excel数据插入完成', ['total_inserted' => $insertedRows]);
-                    }
-                    
-                    // 更新最终进度
-                    $this->importJob->update([
-                        'processed_rows' => $processedRows,
-                        'inserted_rows' => $insertedRows ?? 0,
-                        'error_rows' => $processedRows - ($insertedRows ?? 0),
-                        'replaced_rows' => $replacedRows ?? 0
-                    ]);
-                    
-                    // 释放内存
-                    unset($allRecords);
-                    unset($spreadsheet);
-                    gc_collect_cycles();
-                    
-                    // 手动清理临时目录
-                    Log::info('开始清理PhpSpreadsheet临时目录', ['tempDir' => $tempDir]);
-                    $this->safeRemoveDirectory($tempDir);
-                    
-                } catch (\Exception $e) {
-                    Log::error('Excel导入异常', [
-                        'error' => $e->getMessage(),
-                        'file' => $filePath
-                    ]);
-                    throw new \Exception("Excel导入失败: " . $e->getMessage());
-                }
-            }
-            
-            // 更新任务状态为已完成
-            $this->importJob->update([
-                'status' => 'completed', 
-                'completed_at' => now()
-            ]);
-            
-            Log::info('导入任务完成', [
-                'job_id' => $this->importJob->id,
-                'processed' => $this->importJob->processed_rows,
-                'inserted' => $this->importJob->inserted_rows,
-                'replaced' => $this->importJob->replaced_rows,
-                'duration_minutes' => $this->importJob->started_at->diffInMinutes($this->importJob->completed_at)
-            ]);
-            
-            // 完成后清理临时目录
-            $tempDir = storage_path('app/temp');
-            if (file_exists($tempDir) && is_dir($tempDir)) {
-                // 遍历临时目录
-                foreach (glob($tempDir . '/excel_*') as $dir) {
-                    if (is_dir($dir)) {
-                        // 使用安全删除方法清理
-                        $this->safeRemoveDirectory($dir);
-                    }
-                }
-            }
-            
-            // 释放内存
-            gc_collect_cycles();
-            
-            // 强制进行完整的垃圾回收，确保释放所有不再使用的内存
-            gc_mem_caches();
+            // 处理CSV文件
+            $this->processCsvFile($filePath);
             
         } catch (\Exception $e) {
-            Log::error('导入任务失败', [
+            // 捕获异常，标记任务失败
+            Log::error('导入任务处理异常', [
                 'job_id' => $this->importJob->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ]);
             
             try {
-                // 获取简短的错误消息，限制长度确保不会超出数据库字段
-                $shortErrorMessage = mb_substr('导入失败: ' . $e->getMessage(), 0, 200);
-                
-                // 更新任务状态为失败，只保存简短的错误信息
                 $this->importJob->update([
                     'status' => 'failed',
-                    'error_message' => $shortErrorMessage,
+                    'error_message' => mb_substr($e->getMessage(), 0, 200),
                     'completed_at' => now()
                 ]);
             } catch (\Exception $updateException) {
-                // 如果更新失败，记录到日志
-                Log::critical('无法更新导入任务状态', [
+                Log::error('更新导入任务状态失败', [
                     'job_id' => $this->importJob->id,
                     'error' => $updateException->getMessage()
                 ]);
@@ -1041,27 +600,41 @@ class ProcessImport implements ShouldQueue
             foreach ($recordsByDate as $date => $dateRecords) {
                 // 获取这个日期所有的member_id
                 $memberIds = array_map(function($record) {
-                    return $record['member_id'];
+                    // 确保member_id是字符串类型
+                    return isset($record['member_id']) ? (string)$record['member_id'] : '';
                 }, $dateRecords);
                 
-                // 查询当前日期已存在的记录
-                $existingRecords = DB::table('transactions')
-                    ->where('insert_date', $date)
-                    ->whereIn('member_id', $memberIds)
-                    ->select('member_id')
-                    ->get()
-                    ->pluck('member_id')
-                    ->toArray();
+                // 过滤掉空值
+                $memberIds = array_filter($memberIds, function($id) {
+                    return $id !== '';
+                });
                 
-                // 将已存在的记录转换为关联数组，方便快速查找
-                $existingMemberIds = array_flip($existingRecords);
+                // 查询当前日期已存在的记录
+                $existingRecords = [];
+                $existingMemberIds = [];
+                
+                if (!empty($memberIds)) {
+                    $existingRecords = DB::table('transactions')
+                        ->where('insert_date', $date)
+                        ->whereIn('member_id', $memberIds)
+                        ->select('member_id')
+                        ->get()
+                        ->pluck('member_id')
+                        ->toArray();
+                    
+                    // 将已存在的记录转换为关联数组，确保所有键都是字符串类型
+                    $existingMemberIds = array_flip(array_map('strval', $existingRecords));
+                }
                 
                 // 分拣当前日期的数据为更新或插入
                 $toInsert = [];
                 $toUpdate = [];
                 
                 foreach ($dateRecords as $record) {
-                    if (isset($existingMemberIds[$record['member_id']])) {
+                    // 确保member_id是字符串类型以避免非法偏移类型错误
+                    $memberId = isset($record['member_id']) ? (string)$record['member_id'] : '';
+                    
+                    if ($memberId !== '' && isset($existingMemberIds[$memberId])) {
                         $toUpdate[] = $record;
                     } else {
                         $toInsert[] = $record;
@@ -1290,7 +863,8 @@ class ProcessImport implements ShouldQueue
                 continue;
             }
             
-            $headerToCheck = $header; // 已经标准化过的表头
+            // 确保标头类型正确
+            $headerToCheck = (string)$header;
             
             if (isset($fieldMap[$headerToCheck])) {
                 $headerMap[$index] = $fieldMap[$headerToCheck];
@@ -1347,7 +921,7 @@ class ProcessImport implements ShouldQueue
             return '';
         }
         
-        // 转为字符串
+        // 确保是字符串
         $header = (string)$header;
         
         // 移除特殊字符，只保留字母、数字和下划线
@@ -1368,7 +942,8 @@ class ProcessImport implements ShouldQueue
     protected function ensureCorrectEncoding($str)
     {
         if (!is_string($str)) {
-            return $str;
+            // 修复：如果不是字符串，转为字符串
+            return (string)$str;
         }
         
         // 处理Excel导出的特殊格式 ="xxx"
@@ -1485,25 +1060,39 @@ class ProcessImport implements ShouldQueue
     public function failed(\Throwable $exception)
     {
         try {
-            // 获取简短的错误消息，限制长度确保不会超出数据库字段
-            $shortErrorMessage = mb_substr('导入任务失败: ' . $exception->getMessage(), 0, 200);
+            // 尝试重新从数据库加载导入任务，以防$this->importJob为null
+            if (!$this->importJob) {
+                $this->importJob = ImportJob::find($this->importJobId);
+            }
             
-            // 更新任务状态为失败，只保存简短的错误信息
-            $this->importJob->update([
-                'status' => 'failed',
-                'error_message' => $shortErrorMessage,
-                'completed_at' => now(),
-            ]);
+            // 只有当导入任务存在时才更新
+            if ($this->importJob) {
+                // 获取简短的错误消息，限制长度确保不会超出数据库字段
+                $shortErrorMessage = mb_substr('导入任务失败: ' . $exception->getMessage(), 0, 200);
+                
+                // 更新任务状态为失败，只保存简短的错误信息
+                $this->importJob->update([
+                    'status' => 'failed',
+                    'error_message' => $shortErrorMessage,
+                    'completed_at' => now(),
+                ]);
+            } else {
+                // 如果找不到导入任务，记录错误
+                Log::error("找不到导入任务记录以更新失败状态", [
+                    'job_id' => $this->importJobId ?? 'unknown',
+                    'error' => $exception->getMessage()
+                ]);
+            }
             
             // 记录完整错误到日志
-            Log::error("导入任务失败处理: {$this->importJob->id}", [
-                'error' => $exception->getMessage(),
-                'trace' => $exception->getTraceAsString()
+            Log::error("导入任务失败", [
+                'job_id' => $this->importJobId ?? 'unknown',
+                'error' => $exception->getMessage()
             ]);
         } catch (\Exception $e) {
             // 如果更新失败日志记录也失败，至少记录一下
             Log::critical('无法更新失败的导入任务状态', [
-                'job_id' => $this->importJob->id,
+                'job_id' => $this->importJobId ?? 'unknown',
                 'error' => $e->getMessage()
             ]);
         }
