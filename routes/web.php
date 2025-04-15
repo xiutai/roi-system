@@ -49,6 +49,21 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/import/clear', [ImportController::class, 'clearData'])->name('import.clear');
     Route::get('/import/{id}', [ImportController::class, 'show'])->name('import.show');
     Route::get('/import/{id}/progress', [ImportController::class, 'progress'])->name('import.progress');
+    // 支持CORS预检请求
+    Route::options('/import/{id}/progress', function() {
+        return response('')
+            ->header('Access-Control-Allow-Origin', '*')
+            ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+            ->header('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, X-CSRF-TOKEN, Accept');
+    });
+    // 添加API版本的进度路由，可从任何外部网络访问
+    Route::get('/api/import/{id}/progress', [ImportController::class, 'progress'])->name('api.import.progress');
+    Route::options('/api/import/{id}/progress', function() {
+        return response('')
+            ->header('Access-Control-Allow-Origin', '*')
+            ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+            ->header('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, X-CSRF-TOKEN, Accept');
+    });
     Route::delete('/import/{id}', [ImportController::class, 'destroy'])->name('import.destroy');
 
     // 汇率管理

@@ -228,21 +228,41 @@
     document.addEventListener('DOMContentLoaded', function() {
         // 只有在任务正在处理或等待中时才自动刷新
         @if($importJob->isPending() || $importJob->isProcessing())
+        
+        // 定义重试计数和最大重试次数
+        let retryCount = 0;
+        const maxRetries = 5;
+        const baseRetryDelay = 2000; // 基础重试延迟 2秒
+        
+        // 确保使用绝对URL路径
+        const progressUrl = '{{ url(route('import.progress', $importJob->id)) }}';
+        
         function updateProgress() {
-            fetch('{{ route('import.progress', $importJob->id) }}', {
+            // 添加时间戳防止缓存
+            const url = `${progressUrl}?_=${new Date().getTime()}`;
+            
+            fetch(url, {
                 headers: {
                     'X-Requested-With': 'XMLHttpRequest',
-                    'Accept': 'application/json'
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
                 },
-                credentials: 'same-origin'
+                credentials: 'same-origin',
+                // 添加超时处理
+                signal: AbortSignal.timeout(10000) // 10秒超时
             })
             .then(response => {
                 if (!response.ok) {
+                    // 重置重试计数
+                    retryCount = 0;
                     throw new Error('网络错误，状态码: ' + response.status);
                 }
                 return response.json();
             })
             .then(data => {
+                // 重置重试计数
+                retryCount = 0;
+                
                 // 更新进度条
                 const progressBar = document.querySelector('.progress-bar');
                 progressBar.style.width = data.progress_percentage + '%';
@@ -258,8 +278,10 @@
                 
                 // 如果任务完成或失败，刷新整个页面
                 if (data.status === 'completed' || data.status === 'failed') {
+                    // 使用绝对URL路径
+                    const currentPageUrl = '{{ url()->current() }}';
                     setTimeout(function() {
-                        window.location.reload();
+                        window.location.href = currentPageUrl;
                     }, 1000);
                 } else {
                     // 否则继续轮询
@@ -268,8 +290,19 @@
             })
             .catch(error => {
                 console.error('更新进度失败:', error);
-                // 错误后依然尝试继续更新，降低频率
-                setTimeout(updateProgress, 5000);
+                
+                // 错误重试逻辑
+                retryCount++;
+                const retryDelay = Math.min(baseRetryDelay * Math.pow(1.5, retryCount), 15000); // 指数退避，最多15秒
+                
+                if (retryCount <= maxRetries) {
+                    console.log(`尝试第 ${retryCount} 次重试，${retryDelay}ms 后重试`);
+                    setTimeout(updateProgress, retryDelay);
+                } else {
+                    console.log('达到最大重试次数，尝试刷新页面');
+                    // 重试失败后刷新整页
+                    window.location.reload();
+                }
             });
         }
         

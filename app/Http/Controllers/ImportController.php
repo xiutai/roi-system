@@ -166,26 +166,60 @@ class ImportController extends Controller
      */
     public function progress($id)
     {
-        $importJob = ImportJob::findOrFail($id);
-        
-        // 检查是否为当前用户的导入任务
-        if ($importJob->user_id !== Auth::id()) {
-            return response()->json(['error' => '您无权查看此导入任务'], 403);
+        try {
+            $importJob = ImportJob::findOrFail($id);
+            
+            // 检查是否为当前用户的导入任务
+            if ($importJob->user_id !== Auth::id()) {
+                return response()->json(['error' => '您无权查看此导入任务'], 403)
+                    ->header('Access-Control-Allow-Origin', '*')
+                    ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+                    ->header('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, X-CSRF-TOKEN, Accept');
+            }
+            
+            // 检查任务是否太旧，避免长时间轮询已完成/失败的任务
+            $isTooOld = $importJob->completed_at && $importJob->completed_at->diffInHours(now()) > 24;
+            
+            // 获取最新状态数据
+            $data = [
+                'status' => $importJob->status,
+                'total_rows' => $importJob->total_rows,
+                'processed_rows' => $importJob->processed_rows,
+                'inserted_rows' => $importJob->inserted_rows,
+                'updated_rows' => $importJob->updated_rows,
+                'error_rows' => $importJob->error_rows,
+                'error_message' => $importJob->error_message,
+                'error_details' => $importJob->error_details_array,
+                'progress_percentage' => $importJob->progress_percentage,
+                'started_at' => $importJob->started_at ? $importJob->started_at->format('Y-m-d H:i:s') : null,
+                'completed_at' => $importJob->completed_at ? $importJob->completed_at->format('Y-m-d H:i:s') : null,
+                'is_too_old' => $isTooOld,
+            ];
+            
+            // 设置缓存控制头，避免浏览器缓存进度数据
+            return response()->json($data)
+                ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+                ->header('Pragma', 'no-cache')
+                ->header('Expires', '0')
+                ->header('Access-Control-Allow-Origin', '*')
+                ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+                ->header('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, X-CSRF-TOKEN, Accept');
+                
+        } catch (\Exception $e) {
+            Log::error('获取导入进度出错', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'error' => '获取进度失败: ' . $e->getMessage(),
+                'status' => 'error'
+            ], 500)
+            ->header('Access-Control-Allow-Origin', '*')
+            ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+            ->header('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, X-CSRF-TOKEN, Accept');
         }
-        
-        return response()->json([
-            'status' => $importJob->status,
-            'total_rows' => $importJob->total_rows,
-            'processed_rows' => $importJob->processed_rows,
-            'inserted_rows' => $importJob->inserted_rows,
-            'updated_rows' => $importJob->updated_rows,
-            'error_rows' => $importJob->error_rows,
-            'error_message' => $importJob->error_message,
-            'error_details' => $importJob->error_details_array,
-            'progress_percentage' => $importJob->progress_percentage,
-            'started_at' => $importJob->started_at ? $importJob->started_at->format('Y-m-d H:i:s') : null,
-            'completed_at' => $importJob->completed_at ? $importJob->completed_at->format('Y-m-d H:i:s') : null,
-        ]);
     }
     
     /**
