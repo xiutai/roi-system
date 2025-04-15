@@ -219,11 +219,25 @@ class ProcessImport implements ShouldQueue
     protected function processCsvFile($filePath)
     {
         Log::info('开始处理CSV文件', ['file' => basename($filePath)]);
-        ini_set('memory_limit', '2048M'); // 临时增加内存限制
         
-        // 释放不需要的资源
+        // 内存和执行时间设置
+        ini_set('memory_limit', '4096M'); // 增加内存限制到4GB
+        set_time_limit(0); // 禁用时间限制
+        
+        // 优化MySQL会话设置，提高导入性能
+        DB::statement('SET session wait_timeout=28800'); // 增加会话超时时间
+        DB::statement('SET session interactive_timeout=28800');
+        DB::statement('SET session net_read_timeout=3600');
+        DB::statement('SET session net_write_timeout=3600');
+        
+        // 禁用查询日志以减少内存使用
         DB::disableQueryLog();
+        
+        // 开启垃圾回收
         gc_enable();
+        
+        // 检查和创建必要的索引，以优化导入性能
+        $this->ensureRequiredIndexes();
         
         // 记录开始时间
         $startTime = microtime(true);
@@ -273,6 +287,7 @@ class ProcessImport implements ShouldQueue
             // 初始化统计变量
             $rowCount = 0;
             $insertedCount = 0;
+            $updatedCount = 0;
             $errorCount = 0;
             $skippedCount = 0;
             $insertedRows = 0;
@@ -320,15 +335,8 @@ class ProcessImport implements ShouldQueue
                     $registrationSource = trim($mappedRow['registration_source'] ?? '');
                     $registrationTime = trim($mappedRow['registration_time'] ?? '');
                     
-                    // 如果注册来源为空，设置为"无来源"
                     if (empty($registrationSource)) {
                         $registrationSource = '无来源';
-                        // 删除注册来源为空的详细日志
-                        // Log::info('注册来源为空，已设置为默认值', [
-                        //     'row' => $rowCount,
-                        //     'member_id' => $memberId,
-                        //     'default_source' => $registrationSource
-                        // ]);
                     }
                     
                     // 检查注册时间
@@ -351,15 +359,7 @@ class ProcessImport implements ShouldQueue
                     
                     if (is_numeric($rawBalance)) {
                         $balanceDifference = (float)$rawBalance;
-                    } else {
-                        // 删除详细的非数字充提差额日志
-                        // Log::warning('非数字的充提差额', [
-                        //     'row' => $rowCount,
-                        //     'value' => $rawBalance,
-                        //     'converted' => 0
-                        // ]);
                     }
-                    
                     // 获取或创建渠道
                     if (!isset($channels[$registrationSource])) {
                         try {
@@ -370,25 +370,12 @@ class ProcessImport implements ShouldQueue
                             // 检查编码转换前后是否有变化
                             $sourceChanged = ($encodedSource !== $originalSource);
                             
-                            // 记录原始数据和编码转换结果
-                            Log::info('处理渠道编码', [
-                                'original' => $originalSource,
-                                'original_hex' => bin2hex($originalSource),
-                                'converted' => $encodedSource,
-                                'converted_hex' => bin2hex($encodedSource),
-                                'encoding_changed' => $sourceChanged,
-                                'row' => $rowCount
-                            ]);
                             
                             // 使用转换后的渠道名称
                             $registrationSource = $encodedSource;
                             
                             // 再次检查已存在的渠道映射
                             if (isset($channels[$registrationSource])) {
-                                Log::info('编码转换后找到已存在的渠道', [
-                                    'source' => $registrationSource,
-                                    'channel_id' => $channels[$registrationSource]
-                                ]);
                             }
                             else {
                                 // 先按名称查找是否已存在该渠道
@@ -397,23 +384,13 @@ class ProcessImport implements ShouldQueue
                                 if ($existingChannel) {
                                     // 如果已存在，直接使用
                                     $channels[$registrationSource] = $existingChannel->id;
-                                    Log::info('找到已存在的渠道', [
-                                        'source' => $registrationSource,
-                                        'channel_id' => $existingChannel->id
-                                    ]);
                                 } else {
                                     // 创建新渠道，使用转换后的名称
                                     $channel = new Channel();
                                     $channel->name = $registrationSource;
                                     $channel->description = '从导入数据自动创建';
                                     $channel->save();
-                                    
-                        $channels[$registrationSource] = $channel->id;
-                                    
-                                    Log::info('渠道创建成功', [
-                                        'source' => $registrationSource,
-                                        'channel_id' => $channel->id
-                                    ]);
+                                    $channels[$registrationSource] = $channel->id;
                                 }
                             }
                         } catch (\Exception $e) {
@@ -436,18 +413,11 @@ class ProcessImport implements ShouldQueue
                                 );
                                 $channels[$defaultChannelName] = $defaultChannel->id;
                                 
-                                Log::info('创建默认渠道', [
-                                    'channel_id' => $defaultChannel->id
-                                ]);
                             }
                             
                             // 将错误的渠道映射到默认渠道
                             $channels[$registrationSource] = $channels[$defaultChannelName];
                             
-                            Log::info('使用默认渠道', [
-                                'original_source' => $registrationSource,
-                                'default_channel_id' => $channels[$defaultChannelName]
-                            ]);
                         }
                     }
                     
@@ -467,19 +437,36 @@ class ProcessImport implements ShouldQueue
                         'updated_at' => now(),
                     ];
                     
+                    // 检查会员ID
+                    if (empty($record['member_id'])) {
+                        $skippedCount++;
+                        continue;
+                    }
+                    
+                    // 确保member_id是字符串类型
+                    $record['member_id'] = (string)$record['member_id'];
+                    
                     $allRecords[] = $record;
                     
-                    // 每1000行批量插入一次
-                    if (count($allRecords) >= 1000) {
-                        $insertedCount += $this->batchInsertRecords($allRecords);
-                        $insertedRows += count($allRecords);
+                    // 每3000行批量插入一次
+                    if (count($allRecords) >= 5000) { // 增加批量处理大小到5000
+                        $result = $this->batchInsertRecords($allRecords);
+                        $insertedCount += $result['inserted'];
+                        $updatedCount += $result['updated'];
+                        $insertedRows = $insertedCount + $updatedCount;
                         $allRecords = []; // 清空数组
                         
-                        // 更新进度
-                        $this->importJob->update([
-                            'processed_rows' => $rowCount,
-                            'inserted_rows' => $insertedRows
-                        ]);
+                        // 更新进度，但减少更新频率 - 每15000行才更新一次数据库
+                        if ($rowCount % 15000 === 0) {
+                            $this->importJob->update([
+                                'processed_rows' => $rowCount,
+                                'inserted_rows' => $insertedCount,
+                                'updated_rows' => $updatedCount
+                            ]);
+                            
+                            // 强制回收内存
+                            gc_collect_cycles();
+                        }
                     }
                     
                 } catch (\Exception $e) {
@@ -514,23 +501,20 @@ class ProcessImport implements ShouldQueue
                 }
             }
             
-            // 插入剩余记录
-            if (!empty($allRecords)) {
-                $batchResult = $this->batchInsertRecords($allRecords);
-                $insertedRows += $batchResult;
+            // 处理剩余的记录
+            if (count($allRecords) > 0) {
+                $result = $this->batchInsertRecords($allRecords);
+                $insertedCount += $result['inserted'];
+                $updatedCount += $result['updated'];
+                $insertedRows = $insertedCount + $updatedCount;
             }
             
             // 关闭文件
             fclose($file);
             
-            // 获取更新和新增的记录数
-            $updatedRows = DB::table('transactions')
-                ->where('insert_date', $this->importJob->insert_date)
-                ->where('updated_at', '>', $this->importJob->started_at)
-                ->count();
-            
-            $newRows = $insertedRows - $updatedRows;
-            if ($newRows < 0) $newRows = 0;
+            // 使用统计的计数而不是重新查询数据库
+            $newRows = $insertedCount;
+            $updatedRows = $updatedCount;
             
             // 更新导入任务状态
             $this->importJob->update([
@@ -569,14 +553,19 @@ class ProcessImport implements ShouldQueue
     }
     
     /**
-     * 批量插入记录 - 修改为UPSERT逻辑
-     * 如果insert_date和member_id组合已存在，则更新记录
-     * 如果不存在，则插入新记录
+     * 批量处理记录 - 根据日期和会员ID判断插入或更新
+     * 规则：
+     * 1. 如果数据库中已存在相同insert_date和member_id的记录，则更新该记录
+     * 2. 如果不存在对应的insert_date和member_id组合，则插入新记录
+     * 3. 不同insert_date的记录永远不会被更新，即使member_id相同
+     * 
+     * @param array $records 要处理的记录数组
+     * @return array 包含插入和更新记录数的数组 ['inserted' => 数量, 'updated' => 数量]
      */
     protected function batchInsertRecords($records)
     {
         if (empty($records)) {
-            return 0;
+            return ['inserted' => 0, 'updated' => 0];
         }
 
         try {
@@ -584,101 +573,174 @@ class ProcessImport implements ShouldQueue
             
             $insertedCount = 0;
             $updatedCount = 0;
-            $batchSize = 300;
+            $batchSize = 1000; // 增加批量处理大小
             
-            // 根据insert_date分组记录
-            $recordsByDate = [];
+            // 这是所有导入记录的目标日期
+            $targetDate = $this->importJob->insert_date;
+            
+            // 先清理记录中可能的重复项 - 使用引用直接修改数组值
+            $uniqueRecords = [];
+            
             foreach ($records as $record) {
-                $date = $record['insert_date'];
-                if (!isset($recordsByDate[$date])) {
-                    $recordsByDate[$date] = [];
+                if (!isset($record['insert_date']) || !isset($record['member_id'])) {
+                    continue;
                 }
-                $recordsByDate[$date][] = $record;
+                
+                // 标准化处理会员ID: 移除空格并确保为字符串类型
+                $memberId = (string)trim($record['member_id']);
+                $record['member_id'] = $memberId;
+                
+                // 确保所有记录使用正确的目标日期
+                $record['insert_date'] = $targetDate;
+                
+                // 创建唯一键
+                $key = $targetDate . '_' . $memberId;
+                
+                // 只保留相同组合的最后一条记录
+                $uniqueRecords[$key] = $record;
             }
             
-            // 按日期处理记录，确保只检查同一天内的重复
-            foreach ($recordsByDate as $date => $dateRecords) {
-                // 获取这个日期所有的member_id
-                $memberIds = array_map(function($record) {
-                    // 确保member_id是字符串类型
-                    return isset($record['member_id']) ? (string)$record['member_id'] : '';
-                }, $dateRecords);
+            // 如果没有有效记录，提前返回
+            if (empty($uniqueRecords)) {
+                return ['inserted' => 0, 'updated' => 0];
+            }
+            
+            // 提取所有会员ID，去重
+            $memberIds = [];
+            foreach ($uniqueRecords as $key => $record) {
+                $memberIds[] = $record['member_id'];
+            }
+            $memberIds = array_values(array_unique($memberIds));
+            
+            // 分批查询已存在的记录，减少单次查询负担
+            $existingMemberIds = [];
+            foreach (array_chunk($memberIds, 5000) as $memberIdChunk) {
+                $existingRecords = DB::table('transactions')
+                    ->where('insert_date', $targetDate)
+                    ->whereIn('member_id', $memberIdChunk)
+                    ->select('id', 'member_id')
+                    ->get();
                 
-                // 过滤掉空值
-                $memberIds = array_filter($memberIds, function($id) {
-                    return $id !== '';
-                });
+                foreach ($existingRecords as $record) {
+                    $memberId = (string)trim($record->member_id);
+                    $existingMemberIds[$memberId] = $record->id;
+                }
+            }
+            
+            // 分拣记录 - 直接使用引用优化内存
+            $toInsert = [];
+            $toUpdate = [];
+            
+            foreach ($uniqueRecords as $key => $record) {
+                $memberId = $record['member_id']; // 已经标准化过的会员ID
                 
-                // 查询当前日期已存在的记录
-                $existingRecords = [];
-                $existingMemberIds = [];
+                if (array_key_exists($memberId, $existingMemberIds)) {
+                    $record['existing_id'] = $existingMemberIds[$memberId];
+                    $toUpdate[] = $record;
+                } else {
+                    $toInsert[] = $record;
+                }
+            }
+            
+            // 清理不再需要的数据以释放内存
+            unset($uniqueRecords);
+            unset($memberIds);
+            unset($existingMemberIds);
+            
+            // 批量插入新记录
+            if (!empty($toInsert)) {
+                // 使用单一SQL语句批量插入 - 适用于较大批量的插入
+                $insertChunks = array_chunk($toInsert, $batchSize);
                 
-                if (!empty($memberIds)) {
-                    $existingRecords = DB::table('transactions')
-                        ->where('insert_date', $date)
-                        ->whereIn('member_id', $memberIds)
-                        ->select('member_id')
-                        ->get()
-                        ->pluck('member_id')
-                        ->toArray();
+                foreach ($insertChunks as $chunk) {
+                    // 构建INSERT语句的VALUES部分
+                    $values = [];
+                    $now = now()->format('Y-m-d H:i:s');
                     
-                    // 将已存在的记录转换为关联数组，确保所有键都是字符串类型
-                    $existingMemberIds = array_flip(array_map('strval', $existingRecords));
-                }
-                
-                // 分拣当前日期的数据为更新或插入
-                $toInsert = [];
-                $toUpdate = [];
-                
-                foreach ($dateRecords as $record) {
-                    // 确保member_id是字符串类型以避免非法偏移类型错误
-                    $memberId = isset($record['member_id']) ? (string)$record['member_id'] : '';
+                    foreach ($chunk as $record) {
+                        $values[] = "(" .
+                            DB::connection()->getPdo()->quote($record['currency']) . "," .
+                            DB::connection()->getPdo()->quote($record['member_id']) . "," .
+                            DB::connection()->getPdo()->quote($record['member_account']) . "," .
+                            (int)$record['channel_id'] . "," .
+                            DB::connection()->getPdo()->quote($record['registration_source']) . "," .
+                            DB::connection()->getPdo()->quote($record['registration_time']) . "," .
+                            (float)$record['balance_difference'] . "," .
+                            DB::connection()->getPdo()->quote($record['insert_date']) . "," .
+                            DB::connection()->getPdo()->quote($now) . "," .
+                            DB::connection()->getPdo()->quote($now) . ")";
+                    }
                     
-                    if ($memberId !== '' && isset($existingMemberIds[$memberId])) {
-                        $toUpdate[] = $record;
-                    } else {
-                        $toInsert[] = $record;
-                    }
-                }
-                
-                // 批量插入新记录
-                if (!empty($toInsert)) {
-                    foreach (array_chunk($toInsert, $batchSize) as $batch) {
-                        DB::table('transactions')->insert($batch);
-                    }
-                    $insertedCount += count($toInsert);
-                }
-                
-                // 批量更新现有记录
-                if (!empty($toUpdate)) {
-                    foreach ($toUpdate as $record) {
-                        DB::table('transactions')
-                            ->where('insert_date', $record['insert_date'])
-                            ->where('member_id', $record['member_id'])
-                            ->update([
-                                'currency' => $record['currency'],
-                                'member_account' => $record['member_account'],
-                                'channel_id' => $record['channel_id'],
-                                'registration_source' => $record['registration_source'],
-                                'registration_time' => $record['registration_time'],
-                                'balance_difference' => $record['balance_difference'],
-                                'updated_at' => now()
+                    if (!empty($values)) {
+                        try {
+                            // 使用原生SQL进行批量插入
+                            $sql = "INSERT INTO transactions 
+                                    (currency, member_id, member_account, channel_id, 
+                                     registration_source, registration_time, balance_difference, 
+                                     insert_date, created_at, updated_at) 
+                                    VALUES " . implode(',', $values);
+                            
+                            DB::statement($sql);
+                        } catch (\Exception $e) {
+                            // 如果原生SQL插入失败，回退到Laravel的方法
+                            Log::warning('原生SQL批量插入失败，使用Laravel方法', [
+                                'error' => $e->getMessage()
                             ]);
+                            DB::table('transactions')->insert($chunk);
+                        }
                     }
-                    $updatedCount += count($toUpdate);
                 }
+                
+                $insertedCount = count($toInsert);
+            }
+            
+            // 批量更新已存在的记录 - 使用分块减少循环次数
+            if (!empty($toUpdate)) {
+                $updateCount = 0;
+                $recordsToUpdateInBatch = [];
+                
+                foreach ($toUpdate as $index => $record) {
+                    if (isset($record['existing_id'])) {
+                        $recordId = $record['existing_id'];
+                        
+                        // 只保留需要的字段以减少数据量
+                        $recordsToUpdateInBatch[] = [
+                            'id' => $recordId,
+                            'currency' => $record['currency'],
+                            'member_account' => $record['member_account'],
+                            'channel_id' => $record['channel_id'],
+                            'registration_source' => $record['registration_source'],
+                            'registration_time' => $record['registration_time'],
+                            'balance_difference' => $record['balance_difference'],
+                            'updated_at' => now()
+                        ];
+                        
+                        $updateCount++;
+                        
+                        // 每积累batchSize条记录执行一次批量更新
+                        if ($updateCount % $batchSize === 0) {
+                            $this->performBatchUpdate($recordsToUpdateInBatch);
+                            $recordsToUpdateInBatch = []; // 清空数组准备下一批
+                        }
+                    }
+                }
+                
+                // 处理剩余的更新记录
+                if (!empty($recordsToUpdateInBatch)) {
+                    $this->performBatchUpdate($recordsToUpdateInBatch);
+                }
+                
+                $updatedCount = count($toUpdate);
             }
             
             // 提交事务
             DB::commit();
             
-            // 只保留必要的总结日志
-            Log::info('批量处理完成', [
-                'inserted' => $insertedCount,
+            // 返回包含插入和更新记录数的数组
+            return [
+                'inserted' => $insertedCount, 
                 'updated' => $updatedCount
-            ]);
-            
-            return $insertedCount + $updatedCount;
+            ];
         } catch (\Exception $e) {
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
@@ -689,6 +751,146 @@ class ProcessImport implements ShouldQueue
             ]);
             
             throw $e;
+        }
+    }
+    
+    /**
+     * 执行批量更新操作 - 高效版
+     * 
+     * @param array $records 要更新的记录数组
+     * @return void
+     */
+    protected function performBatchUpdate($records)
+    {
+        if (empty($records)) {
+            return;
+        }
+        
+        // 使用更大的批量大小
+        $chunks = array_chunk($records, 200);
+        
+        foreach ($chunks as $chunk) {
+            if (empty($chunk)) {
+                continue;
+            }
+            
+            // 构建更高效的批量更新查询
+            $updateValues = [];
+            $ids = [];
+            
+            foreach ($chunk as $record) {
+                $ids[] = $record['id'];
+                
+                // 对每个记录构建完整的更新值集合
+                $updateValues[] = "(" . 
+                    $record['id'] . "," .
+                    DB::connection()->getPdo()->quote($record['currency']) . "," . 
+                    DB::connection()->getPdo()->quote($record['member_account']) . "," . 
+                    DB::connection()->getPdo()->quote($record['channel_id']) . "," . 
+                    DB::connection()->getPdo()->quote($record['registration_source']) . "," . 
+                    DB::connection()->getPdo()->quote($record['registration_time']) . "," . 
+                    DB::connection()->getPdo()->quote($record['balance_difference']) . ")";
+            }
+            
+            // 没有记录需要更新
+            if (empty($updateValues)) {
+                continue;
+            }
+            
+            // 使用单一高效SQL - ON DUPLICATE KEY UPDATE代替CASE WHEN
+            try {
+                // 用临时表方式批量更新 - 对于MySQL 5.7+效率更高
+                $tempTable = 'temp_update_' . mt_rand(10000, 99999);
+                
+                // 创建临时表
+                DB::statement("CREATE TEMPORARY TABLE {$tempTable} (
+                    id INT NOT NULL,
+                    currency VARCHAR(10),
+                    member_account VARCHAR(100),
+                    channel_id INT,
+                    registration_source VARCHAR(255),
+                    registration_time VARCHAR(50),
+                    balance_difference DECIMAL(15,2)
+                )");
+                
+                // 插入数据到临时表
+                $insertSql = "INSERT INTO {$tempTable} (id, currency, member_account, channel_id, registration_source, registration_time, balance_difference) VALUES " . implode(',', $updateValues);
+                DB::statement($insertSql);
+                
+                // 从临时表更新主表
+                $updateSql = "UPDATE transactions t, {$tempTable} tt 
+                              SET t.currency = tt.currency,
+                                  t.member_account = tt.member_account,
+                                  t.channel_id = tt.channel_id,
+                                  t.registration_source = tt.registration_source,
+                                  t.registration_time = tt.registration_time,
+                                  t.balance_difference = tt.balance_difference,
+                                  t.updated_at = NOW()
+                              WHERE t.id = tt.id";
+                DB::statement($updateSql);
+                
+                // 删除临时表
+                DB::statement("DROP TEMPORARY TABLE IF EXISTS {$tempTable}");
+                
+            } catch (\Exception $e) {
+                // 如果临时表方法失败，回退到传统方法
+                Log::warning('高效批量更新失败，使用传统方法', ['error' => $e->getMessage()]);
+                
+                // 传统直接更新方法
+                $updateStmt = "UPDATE transactions 
+                               SET currency = CASE id ";
+                
+                foreach ($chunk as $record) {
+                    $id = $record['id'];
+                    $updateStmt .= " WHEN {$id} THEN " . DB::connection()->getPdo()->quote($record['currency']);
+                }
+                
+                $updateStmt .= " ELSE currency END,
+                               member_account = CASE id ";
+                               
+                foreach ($chunk as $record) {
+                    $id = $record['id'];
+                    $updateStmt .= " WHEN {$id} THEN " . DB::connection()->getPdo()->quote($record['member_account']);
+                }
+                
+                $updateStmt .= " ELSE member_account END,
+                               channel_id = CASE id ";
+                               
+                foreach ($chunk as $record) {
+                    $id = $record['id'];
+                    $updateStmt .= " WHEN {$id} THEN " . DB::connection()->getPdo()->quote($record['channel_id']);
+                }
+                
+                $updateStmt .= " ELSE channel_id END,
+                               registration_source = CASE id ";
+                               
+                foreach ($chunk as $record) {
+                    $id = $record['id'];
+                    $updateStmt .= " WHEN {$id} THEN " . DB::connection()->getPdo()->quote($record['registration_source']);
+                }
+                
+                $updateStmt .= " ELSE registration_source END,
+                               registration_time = CASE id ";
+                               
+                foreach ($chunk as $record) {
+                    $id = $record['id'];
+                    $updateStmt .= " WHEN {$id} THEN " . DB::connection()->getPdo()->quote($record['registration_time']);
+                }
+                
+                $updateStmt .= " ELSE registration_time END,
+                               balance_difference = CASE id ";
+                               
+                foreach ($chunk as $record) {
+                    $id = $record['id'];
+                    $updateStmt .= " WHEN {$id} THEN " . DB::connection()->getPdo()->quote($record['balance_difference']);
+                }
+                
+                $updateStmt .= " ELSE balance_difference END,
+                               updated_at = NOW()
+                               WHERE id IN (" . implode(',', $ids) . ")";
+                
+                DB::statement($updateStmt);
+            }
         }
     }
 
@@ -961,24 +1163,9 @@ class ProcessImport implements ShouldQueue
         
         // 转换编码 - 优先处理中文Windows编码
         if ($detectedEncoding && $detectedEncoding !== 'UTF-8') {
-            Log::debug('检测到非UTF-8编码', [
-                'original' => $str, 
-                'detected_encoding' => $detectedEncoding,
-                'hex' => bin2hex($str)
-            ]);
-            
             // 明确指定CP936/GBK/GB2312转UTF-8，避免自动检测错误
             if (in_array($detectedEncoding, ['CP936', 'GBK', 'GB2312', 'GB18030'])) {
                 $converted = mb_convert_encoding($str, 'UTF-8', $detectedEncoding);
-                
-                // 记录转换结果
-                Log::debug('中文编码转换', [
-                    'from' => $detectedEncoding,
-                    'to' => 'UTF-8',
-                    'before_hex' => bin2hex($str),
-                    'after_hex' => bin2hex($converted)
-                ]);
-                
                 return $converted;
             }
             
@@ -1149,4 +1336,30 @@ class ProcessImport implements ShouldQueue
         }
     }
 
-} 
+    /**
+     * 检查和创建必要的索引，以优化导入性能
+     */
+    protected function ensureRequiredIndexes()
+    {
+        try {
+            // 检查transactions表是否存在必要的索引
+            $indexExists = false;
+            
+            // 检查insert_date和member_id组合索引是否存在
+            $indexes = DB::select("SHOW INDEXES FROM transactions WHERE Key_name = 'transactions_insert_date_member_id_index'");
+            $indexExists = !empty($indexes);
+            
+            if (!$indexExists) {
+                // 记录索引不存在，但不在导入过程中创建
+                Log::info('Insert_date和member_id的索引不存在，建议单独创建以提高性能');
+                
+                // 索引不存在，仍继续处理导入，不阻塞流程
+            } else {
+                Log::info('Insert_date和member_id的组合索引已存在，将提高导入性能');
+            }
+        } catch (\Exception $e) {
+            // 如果检查索引失败，记录错误但继续执行导入
+            Log::warning('检查索引时出错，继续处理', ['error' => $e->getMessage()]);
+        }
+    }
+}
